@@ -1,6 +1,6 @@
 # pyVisiToolkit
-Miscellaneous homegrown tools and helpers written in Python 2.7
-for the proprietary building and process management system
+Miscellaneous inofficial homegrown tools and helpers written in Python 2.7
+for the proprietary Building and Process Management System
 
 'ProMoS NT' (c) MST Systemtechnik AG
 
