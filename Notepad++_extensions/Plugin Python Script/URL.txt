@@ -1,0 +1,3 @@
+URL for getting Notepad++ Plugin "Python Script":
+
+https://sourceforge.net/projects/npppythonscript/files/Python%20Script%201.0.8.0/PythonScript_1.0.8.0.msi/download
