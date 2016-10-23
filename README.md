@@ -11,3 +11,4 @@ Intention: Support creator of visualisation projects... Add efficiency... Reduce
 
 
 Disclaimer: Use 'pyVisiToolkit' at your own risk!
+Disclaimer Part2: I should rewrite everything to handle encodings the right way... :-/
