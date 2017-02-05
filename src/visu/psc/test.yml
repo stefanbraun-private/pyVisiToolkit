@@ -1,0 +1,11 @@
+WINDOW:
+  v15:      &WINDOW_v15
+    master:
+      _linemark: WIN
+      _obj: str
+      _split: 9
+
+  v16:      *WINDOW_v15
+  v17:
+    <<: *WINDOW_v15
+    foo: 123

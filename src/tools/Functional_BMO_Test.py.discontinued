@@ -1,0 +1,45 @@
+#!/usr/bin/env python
+# encoding: utf-8
+"""
+tools.Functional_BMO_Test.py.discontinued
+
+Copyright (C) 2016 Stefan Braun
+
+This program is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, either version 2 of the License, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License along with this program. If not, see <http://www.gnu.org/licenses/>.
+"""
+
+import dms.dmspipe
+import itertools
+
+class Dms_dp(object):
+	pass
+class Digital_dp(Dms_dp):
+	pass
+class Analogue_dp(Dms_dp):
+	pass
+
+def main(argv=None):
+
+
+	curr_dms = dms.dmspipe.Dmspipe()
+
+	# Beispiele von kommunizierten SPS-Variablen:
+	# MSR01:H06:LG:Mux01:E0:PLC
+	# MSR01:H06:LG:Mux01:Hand_Mel:PLC
+	# MSR01:H06:LG:Mux01:Hand_Soft:PLC
+	# MSR01:H06:LG:Mux01:I0:PLC
+	# MSR01:H06:LG:Mux01:I1:PLC
+	# MSR01:H06:LG:Mux01:Output:PLC
+
+
+
+	return 0        # success
+
+
+if __name__ == '__main__':
+	status = main()
+	# sys.exit(status)

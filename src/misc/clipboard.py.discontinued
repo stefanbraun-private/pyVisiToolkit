@@ -1,0 +1,567 @@
+#!/usr/bin/env python
+# encoding: utf-8
+"""
+misc.clipboard.py
+stores and retrieves PROMOS clipboard objects
+
+Copyright (C) 2016 Stefan Braun
+
+This program is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, either version 2 of the License, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License along with this program. If not, see <http://www.gnu.org/licenses/>.
+"""
+
+# very good helper tool for reversing clipboard format:
+# http://www.nirsoft.net/utils/inside_clipboard.html
+
+# based on example code from
+# http://bugs.python.org/file37366/test_clipboard_win.py
+
+DEBUGGING = True
+
+import ctypes, locale, sys
+
+class _CP_PROMOS_HEADER_FIELDS(ctypes.Structure):
+	"""
+	unknown header of clipboard object "PROMOS"
+	"""
+	_fields_ = [("unknown_bytes1",  ctypes.c_char * 4),  # FIXME: What's in these bytes?
+	            ("nof_objects",     ctypes.c_uint16),   # amount of objects in PROMOS clipboard object
+				("unknown_bytes2",  ctypes.c_char * 19)]  # FIXME: What's in these bytes?
+
+
+# FIXME: quick and dirty code; for explanation look into "dmspipe.py"
+class CP_PROMOS_HEADER(ctypes.Union):
+	"""
+	unknown header of clipboard object "PROMOS"
+	"""
+	LENGTH = 25
+
+	# ways to get to content of "ctypes.c_char * 123" bytestring-arrays:
+	# repr(msg.raw)
+	# ctypes.string_at(ctypes.byref(msg), ctypes.sizeof(msg)))
+	_anonymous_ = ("fields",)
+	_fields_ = [("fields",  _CP_PROMOS_HEADER_FIELDS),
+				("raw_bytearray",   ctypes.c_ubyte * LENGTH)]
+
+	def get_raw_bytestring(self):
+		return bytearray(self.raw_bytearray)
+
+
+
+class _CP_PROMOS_LINE_FIELDS(ctypes.Structure):
+	"""
+	unknown structure of object "Line", embedded into clipboard object "PROMOS"
+	"""
+	_fields_ = [("unknown_bytes1",  ctypes.c_char * 187),  # FIXME: What's in these bytes?
+	            ("unknown_bytes2",  ctypes.c_char * 1)]  # FIXME: What's in these bytes?
+
+
+# FIXME: quick and dirty code; for explanation look into "dmspipe.py"
+class CP_PROMOS_LINE(ctypes.Union):
+	"""
+	unknown structure of object "Line", embedded into clipboard object "PROMOS"
+	"""
+	LENGTH = 188
+
+	# ways to get to content of "ctypes.c_char * 123" bytestring-arrays:
+	# repr(msg.raw)
+	# ctypes.string_at(ctypes.byref(msg), ctypes.sizeof(msg)))
+	_anonymous_ = ("fields",)
+	_fields_ = [("fields",  _CP_PROMOS_LINE_FIELDS),
+				("raw_bytearray",   ctypes.c_ubyte * LENGTH)]
+
+	def get_raw_bytestring(self):
+		return bytearray(self.raw_bytearray)
+
+class _CP_PROMOS_RECTANGLE_FIELDS(ctypes.Structure):
+	"""
+	unknown structure of object "Rectangle", embedded into clipboard object "PROMOS"
+	"""
+	_fields_ = [("unknown_bytes1",  ctypes.c_char * 187),  # FIXME: What's in these bytes?
+	            ("unknown_bytes2",  ctypes.c_char * 1)]  # FIXME: What's in these bytes?
+
+
+# FIXME: quick and dirty code; for explanation look into "dmspipe.py"
+class CP_PROMOS_RECTANGLE(ctypes.Union):
+	"""
+	unknown structure of object "Rectangle", embedded into clipboard object "PROMOS"
+	"""
+	LENGTH = 188
+
+	# ways to get to content of "ctypes.c_char * 123" bytestring-arrays:
+	# repr(msg.raw)
+	# ctypes.string_at(ctypes.byref(msg), ctypes.sizeof(msg)))
+	_anonymous_ = ("fields",)
+	_fields_ = [("fields",  _CP_PROMOS_RECTANGLE_FIELDS),
+				("raw_bytearray",   ctypes.c_ubyte * LENGTH)]
+
+	def get_raw_bytestring(self):
+		return bytearray(self.raw_bytearray)
+
+
+class _CP_PROMOS_ROUNDRECTANGLE_FIELDS(ctypes.Structure):
+	"""
+	unknown structure of object "Round Rectangle", embedded into clipboard object "PROMOS"
+	"""
+	_fields_ = [("unknown_bytes1",  ctypes.c_char * 187),  # FIXME: What's in these bytes?
+	            ("unknown_bytes2",  ctypes.c_char * 1)]  # FIXME: What's in these bytes?
+
+
+# FIXME: quick and dirty code; for explanation look into "dmspipe.py"
+class CP_PROMOS_ROUNDRECTANGLE(ctypes.Union):
+	"""
+	unknown structure of object "Round Rectangle", embedded into clipboard object "PROMOS"
+	"""
+	LENGTH = 188
+
+	# ways to get to content of "ctypes.c_char * 123" bytestring-arrays:
+	# repr(msg.raw)
+	# ctypes.string_at(ctypes.byref(msg), ctypes.sizeof(msg)))
+	_anonymous_ = ("fields",)
+	_fields_ = [("fields",  _CP_PROMOS_ROUNDRECTANGLE_FIELDS),
+				("raw_bytearray",   ctypes.c_ubyte * LENGTH)]
+
+	def get_raw_bytestring(self):
+		return bytearray(self.raw_bytearray)
+
+class _CP_PROMOS_CIRCLE_FIELDS(ctypes.Structure):
+	"""
+	unknown structure of object "Circle", embedded into clipboard object "PROMOS"
+	"""
+	_fields_ = [("unknown_bytes1",  ctypes.c_char * 187),  # FIXME: What's in these bytes?
+	            ("unknown_bytes2",  ctypes.c_char * 1)]  # FIXME: What's in these bytes?
+
+
+# FIXME: quick and dirty code; for explanation look into "dmspipe.py"
+class CP_PROMOS_CIRCLE(ctypes.Union):
+	"""
+	unknown structure of object "Circle", embedded into clipboard object "PROMOS"
+	"""
+	LENGTH = 188
+
+	# ways to get to content of "ctypes.c_char * 123" bytestring-arrays:
+	# repr(msg.raw)
+	# ctypes.string_at(ctypes.byref(msg), ctypes.sizeof(msg)))
+	_anonymous_ = ("fields",)
+	_fields_ = [("fields",  _CP_PROMOS_CIRCLE_FIELDS),
+				("raw_bytearray",   ctypes.c_ubyte * LENGTH)]
+
+	def get_raw_bytestring(self):
+		return bytearray(self.raw_bytearray)
+
+##############################
+# FIXME: object Polyline (type number 0x10) has minimum size of 189 Bytes,
+# size depends on amount of points (in PSC-file this is a parameter in PNT;<X>;....
+
+
+class _CP_PROMOS_TEXT_FIELDS(ctypes.Structure):
+	"""
+	unknown structure of object "Text", embedded into clipboard object "PROMOS"
+	"""
+	_fields_ = [("unknown_bytes1",  ctypes.c_char * 268),  # FIXME: What's in these bytes?
+	            ("unknown_bytes2",  ctypes.c_char * 1)]  # FIXME: What's in these bytes?
+
+
+# FIXME: quick and dirty code; for explanation look into "dmspipe.py"
+class CP_PROMOS_TEXT(ctypes.Union):
+	"""
+	unknown structure of object "Text", embedded into clipboard object "PROMOS"
+	"""
+	LENGTH = 269
+
+	# ways to get to content of "ctypes.c_char * 123" bytestring-arrays:
+	# repr(msg.raw)
+	# ctypes.string_at(ctypes.byref(msg), ctypes.sizeof(msg)))
+	_anonymous_ = ("fields",)
+	_fields_ = [("fields",  _CP_PROMOS_TEXT_FIELDS),
+				("raw_bytearray",   ctypes.c_ubyte * LENGTH)]
+
+	def get_raw_bytestring(self):
+		return bytearray(self.raw_bytearray)
+
+
+class _CP_PROMOS_BUTTON_FIELDS(ctypes.Structure):
+	"""
+	unknown structure of object "Button", embedded into clipboard object "PROMOS"
+	"""
+	_fields_ = [("unknown_bytes1",  ctypes.c_char * 272),  # FIXME: What's in these bytes?
+	            ("unknown_bytes2",  ctypes.c_char * 1)]  # FIXME: What's in these bytes?
+
+
+# FIXME: quick and dirty code; for explanation look into "dmspipe.py"
+class CP_PROMOS_BUTTON(ctypes.Union):
+	"""
+	unknown structure of object "Button", embedded into clipboard object "PROMOS"
+	"""
+	LENGTH = 273
+
+	# ways to get to content of "ctypes.c_char * 123" bytestring-arrays:
+	# repr(msg.raw)
+	# ctypes.string_at(ctypes.byref(msg), ctypes.sizeof(msg)))
+	_anonymous_ = ("fields",)
+	_fields_ = [("fields",  _CP_PROMOS_BUTTON_FIELDS),
+				("raw_bytearray",   ctypes.c_ubyte * LENGTH)]
+
+	def get_raw_bytestring(self):
+		return bytearray(self.raw_bytearray)
+
+class _CP_PROMOS_CHECKBOX_FIELDS(ctypes.Structure):
+	"""
+	unknown structure of object "Checkbox", embedded into clipboard object "PROMOS"
+	"""
+	_fields_ = [("unknown_bytes1",  ctypes.c_char * 273),  # FIXME: What's in these bytes?
+	            ("unknown_bytes2",  ctypes.c_char * 1)]  # FIXME: What's in these bytes?
+
+
+# FIXME: quick and dirty code; for explanation look into "dmspipe.py"
+class CP_PROMOS_CHECKBOX(ctypes.Union):
+	"""
+	unknown structure of object "Checkbox", embedded into clipboard object "PROMOS"
+	"""
+	LENGTH = 274
+
+	# ways to get to content of "ctypes.c_char * 123" bytestring-arrays:
+	# repr(msg.raw)
+	# ctypes.string_at(ctypes.byref(msg), ctypes.sizeof(msg)))
+	_anonymous_ = ("fields",)
+	_fields_ = [("fields",  _CP_PROMOS_CHECKBOX_FIELDS),
+				("raw_bytearray",   ctypes.c_ubyte * LENGTH)]
+
+	def get_raw_bytestring(self):
+		return bytearray(self.raw_bytearray)
+
+class _CP_PROMOS_RADIOBUTTON_FIELDS(ctypes.Structure):
+	"""
+	unknown structure of object "Radiobutton", embedded into clipboard object "PROMOS"
+	"""
+	_fields_ = [("unknown_bytes1",  ctypes.c_char * 276),  # FIXME: What's in these bytes?
+	            ("unknown_bytes2",  ctypes.c_char * 1)]  # FIXME: What's in these bytes?
+
+
+# FIXME: quick and dirty code; for explanation look into "dmspipe.py"
+class CP_PROMOS_RADIOBUTTON(ctypes.Union):
+	"""
+	unknown structure of object "Radiobutton", embedded into clipboard object "PROMOS"
+	"""
+	LENGTH = 277
+
+	# ways to get to content of "ctypes.c_char * 123" bytestring-arrays:
+	# repr(msg.raw)
+	# ctypes.string_at(ctypes.byref(msg), ctypes.sizeof(msg)))
+	_anonymous_ = ("fields",)
+	_fields_ = [("fields",  _CP_PROMOS_RADIOBUTTON_FIELDS),
+				("raw_bytearray",   ctypes.c_ubyte * LENGTH)]
+
+	def get_raw_bytestring(self):
+		return bytearray(self.raw_bytearray)
+
+class _CP_PROMOS_EDITBOX_FIELDS(ctypes.Structure):
+	"""
+	unknown structure of object "Editbox", embedded into clipboard object "PROMOS"
+	"""
+	_fields_ = [("unknown_bytes1",  ctypes.c_char * 275),  # FIXME: What's in these bytes?
+	            ("unknown_bytes2",  ctypes.c_char * 1)]  # FIXME: What's in these bytes?
+
+
+# FIXME: quick and dirty code; for explanation look into "dmspipe.py"
+class CP_PROMOS_EDITBOX(ctypes.Union):
+	"""
+	unknown structure of object "Editbox", embedded into clipboard object "PROMOS"
+	"""
+	LENGTH = 276
+
+	# ways to get to content of "ctypes.c_char * 123" bytestring-arrays:
+	# repr(msg.raw)
+	# ctypes.string_at(ctypes.byref(msg), ctypes.sizeof(msg)))
+	_anonymous_ = ("fields",)
+	_fields_ = [("fields",  _CP_PROMOS_EDITBOX_FIELDS),
+				("raw_bytearray",   ctypes.c_ubyte * LENGTH)]
+
+	def get_raw_bytestring(self):
+		return bytearray(self.raw_bytearray)
+
+class _CP_PROMOS_ICON_FIELDS(ctypes.Structure):
+	"""
+	unknown structure of object "Icon", embedded into clipboard object "PROMOS"
+	"""
+	_fields_ = [("unknown_bytes1",  ctypes.c_char * 264),  # FIXME: What's in these bytes?
+	            ("unknown_bytes2",  ctypes.c_char * 1)]  # FIXME: What's in these bytes?
+
+
+# FIXME: quick and dirty code; for explanation look into "dmspipe.py"
+class CP_PROMOS_ICON(ctypes.Union):
+	"""
+	unknown structure of object "Icon", embedded into clipboard object "PROMOS"
+	"""
+	LENGTH = 265
+
+	# ways to get to content of "ctypes.c_char * 123" bytestring-arrays:
+	# repr(msg.raw)
+	# ctypes.string_at(ctypes.byref(msg), ctypes.sizeof(msg)))
+	_anonymous_ = ("fields",)
+	_fields_ = [("fields",  _CP_PROMOS_ICON_FIELDS),
+				("raw_bytearray",   ctypes.c_ubyte * LENGTH)]
+
+	def get_raw_bytestring(self):
+		return bytearray(self.raw_bytearray)
+
+class _CP_PROMOS_RULER_FIELDS(ctypes.Structure):
+	"""
+	unknown structure of object "Ruler", embedded into clipboard object "PROMOS"
+	"""
+	_fields_ = [("unknown_bytes1",  ctypes.c_char * 264),  # FIXME: What's in these bytes?
+	            ("unknown_bytes2",  ctypes.c_char * 1)]  # FIXME: What's in these bytes?
+
+
+# FIXME: quick and dirty code; for explanation look into "dmspipe.py"
+class CP_PROMOS_RULER(ctypes.Union):
+	"""
+	unknown structure of object "Ruler", embedded into clipboard object "PROMOS"
+	"""
+	LENGTH = 265
+
+	# ways to get to content of "ctypes.c_char * 123" bytestring-arrays:
+	# repr(msg.raw)
+	# ctypes.string_at(ctypes.byref(msg), ctypes.sizeof(msg)))
+	_anonymous_ = ("fields",)
+	_fields_ = [("fields",  _CP_PROMOS_RULER_FIELDS),
+				("raw_bytearray",   ctypes.c_ubyte * LENGTH)]
+
+	def get_raw_bytestring(self):
+		return bytearray(self.raw_bytearray)
+
+class _CP_PROMOS_TREND_FIELDS(ctypes.Structure):
+	"""
+	unknown structure of object "Trend", embedded into clipboard object "PROMOS"
+	"""
+	_fields_ = [("unknown_bytes1",  ctypes.c_char * 264),  # FIXME: What's in these bytes?
+	            ("unknown_bytes2",  ctypes.c_char * 1)]  # FIXME: What's in these bytes?
+
+
+# FIXME: quick and dirty code; for explanation look into "dmspipe.py"
+class CP_PROMOS_TREND(ctypes.Union):
+	"""
+	unknown structure of object "Trend", embedded into clipboard object "PROMOS"
+	"""
+	LENGTH = 265
+
+	# ways to get to content of "ctypes.c_char * 123" bytestring-arrays:
+	# repr(msg.raw)
+	# ctypes.string_at(ctypes.byref(msg), ctypes.sizeof(msg)))
+	_anonymous_ = ("fields",)
+	_fields_ = [("fields",  _CP_PROMOS_TREND_FIELDS),
+				("raw_bytearray",   ctypes.c_ubyte * LENGTH)]
+
+	def get_raw_bytestring(self):
+		return bytearray(self.raw_bytearray)
+
+
+class _CP_PROMOS_COMBOBOX_FIELDS(ctypes.Structure):
+	"""
+	unknown structure of object "Combobox", embedded into clipboard object "PROMOS"
+	"""
+	_fields_ = [("unknown_bytes1",  ctypes.c_char * 280),  # FIXME: What's in these bytes?
+	            ("unknown_bytes2",  ctypes.c_char * 1)]  # FIXME: What's in these bytes?
+
+
+# FIXME: quick and dirty code; for explanation look into "dmspipe.py"
+class CP_PROMOS_COMBOBOX(ctypes.Union):
+	"""
+	unknown structure of object "Combobox", embedded into clipboard object "PROMOS"
+	"""
+	LENGTH = 281
+
+	# ways to get to content of "ctypes.c_char * 123" bytestring-arrays:
+	# repr(msg.raw)
+	# ctypes.string_at(ctypes.byref(msg), ctypes.sizeof(msg)))
+	_anonymous_ = ("fields",)
+	_fields_ = [("fields",  _CP_PROMOS_COMBOBOX_FIELDS),
+				("raw_bytearray",   ctypes.c_ubyte * LENGTH)]
+
+	def get_raw_bytestring(self):
+		return bytearray(self.raw_bytearray)
+
+
+# http://stackoverflow.com/questions/579687/how-do-i-copy-a-string-to-the-clipboard-on-windows-using-python/4203897
+class Clipboard(object):
+	# based on example code from
+	# http://bugs.python.org/file37366/test_clipboard_win.py
+	# http://stackoverflow.com/questions/579687/how-do-i-copy-a-string-to-the-clipboard-on-windows-using-python/4203897
+
+	CF_UNICODETEXT = 13
+	CF_PROMOS = 49604       # custom clipboard format used by ProMoS (format name "PROMOS")
+	CF_CATALOGUE_OBJ = 49605    # custom clipboard format used by ProMoS (format name "Catalogue Object")
+	GMEM_DDESHARE = 0x2000
+
+	def __init__(self):
+		self.wcscpy = ctypes.cdll.msvcrt.wcscpy
+		self.OpenClipboard = ctypes.windll.user32.OpenClipboard
+		self.EmptyClipboard = ctypes.windll.user32.EmptyClipboard
+		self.GetClipboardData = ctypes.windll.user32.GetClipboardData
+		self.SetClipboardData = ctypes.windll.user32.SetClipboardData
+		self.CloseClipboard = ctypes.windll.user32.CloseClipboard
+		self.GlobalAlloc = ctypes.windll.kernel32.GlobalAlloc
+		self.GlobalLock = ctypes.windll.kernel32.GlobalLock
+		self.GlobalUnlock = ctypes.windll.kernel32.GlobalUnlock
+
+	def copy_c(self, data):
+		try:  # Python 2
+			if not isinstance(data, unicode):
+				data = data.decode('mbcs')
+		except NameError:
+			if not isinstance(data, str):
+				data = data.decode('mbcs')
+		self.OpenClipboard(None)
+		self.EmptyClipboard()
+		hCd = self.GlobalAlloc(Clipboard.GMEM_DDESHARE, 2 * (len(data) + 1))
+		pchData = self.GlobalLock(hCd)
+		self.wcscpy(ctypes.c_wchar_p(pchData), data)
+		self.GlobalUnlock(hCd)
+		self.SetClipboardData(Clipboard.CF_UNICODETEXT, hCd)
+		self.CloseClipboard()
+
+
+	def paste_c(self):
+		self.OpenClipboard(None)
+		handle = self.GetClipboardData(self.CF_PROMOS)
+		if handle != 0:
+			#myBuffer = ctypes.create_string_buffer(buf_size)
+			header = CP_PROMOS_HEADER()
+			buf_size = ctypes.sizeof(CP_PROMOS_HEADER)
+			offset = 0
+			ctypes.memmove(ctypes.byref(header), handle + offset, buf_size)
+			offset = buf_size - 1
+			if DEBUGGING:
+				print('Clipboard.paste_c(): nof_objects = ' + str(header.nof_objects))
+				print('header content: ' + repr(header.get_raw_bytestring()))
+
+			for obj in range(header.nof_objects):
+				# collect all objects
+
+				# first byte is the type (assumption: length two bytes)
+				if DEBUGGING:
+					print('offset=' + str(offset))
+				curr_type = ctypes.c_ushort()
+				buf_size = 2
+				ctypes.memmove(ctypes.byref(curr_type), handle + offset, buf_size)
+				offset = offset + buf_size
+
+				if DEBUGGING:
+					print('curr_type=' + str(curr_type))
+
+				if curr_type.value == 0x0001:
+					# got a Line object
+					if DEBUGGING:
+						print('Reading a Line object...')
+					curr_obj = CP_PROMOS_LINE()
+				elif curr_type.value == 0x0002:
+					# got a Rectangle object
+					if DEBUGGING:
+						print('Reading a Rectangle object...')
+					curr_obj = CP_PROMOS_RECTANGLE()
+				elif curr_type.value == 0x0004:
+					# got a Round Rectangle object
+					if DEBUGGING:
+						print('Reading a Round Rectangle object...')
+					curr_obj = CP_PROMOS_ROUNDRECTANGLE()
+				elif curr_type.value == 0x0008:
+					# got a Circle object
+					if DEBUGGING:
+						print('Reading a Circle object...')
+					curr_obj = CP_PROMOS_CIRCLE()
+				elif curr_type.value == 0x0010:
+					# got a Polyline object
+					# FIXME!!!!!
+					# minimal size is 182 Bytes (then it has only ONE point),
+					# plus 8 Bytes per additional point,
+					# (amount of points are stored in 166th/167th byte (in first polyline: address 0xC0/0xC1))
+					# max. amount of points must be 65535 or less.
+					print('WARNING: NOT YET IMPLEMENTED, NOW ALL FURTHER PARSING WILL GO WRONG!!!')
+					pass
+				elif curr_type.value == 0x0020:
+					# got a Text object
+					if DEBUGGING:
+						print('Reading a Text object...')
+					curr_obj = CP_PROMOS_TEXT()
+				elif curr_type.value == 0x0040:
+					# got a Button object
+					if DEBUGGING:
+						print('Reading a Button object...')
+					curr_obj = CP_PROMOS_BUTTON()
+				elif curr_type.value == 0x0080:
+					# got a Icon object
+					if DEBUGGING:
+						print('Reading a Icon object...')
+					curr_obj = CP_PROMOS_ICON()
+				elif curr_type.value == 0x0200:
+					# got a Trend object
+					if DEBUGGING:
+						print('Reading a Trend object...')
+					curr_obj = CP_PROMOS_TREND()
+				elif curr_type.value == 0x0300:
+					# got a Ruler object
+					if DEBUGGING:
+						print('Reading a Ruler object...')
+					curr_obj = CP_PROMOS_RULER()
+				elif curr_type.value == 0x0F00:
+					# got a Checkbox object
+					if DEBUGGING:
+						print('Reading a Checkbox object...')
+					curr_obj = CP_PROMOS_CHECKBOX()
+				elif curr_type.value == 0x1000:
+					# got a Radiobutton object
+					if DEBUGGING:
+						print('Reading a Radiobutton object...')
+					curr_obj = CP_PROMOS_RADIOBUTTON()
+				elif curr_type.value == 0x2000:
+					# got a Editbox object
+					if DEBUGGING:
+						print('Reading a Editbox object...')
+					curr_obj = CP_PROMOS_EDITBOX()
+				elif curr_type.value == 0x3000:
+					# got a Combobox object
+					if DEBUGGING:
+						print('Reading a Combobox object...')
+					curr_obj = CP_PROMOS_COMBOBOX()
+
+
+
+				buf_size = ctypes.sizeof(curr_obj)
+				ctypes.memmove(ctypes.byref(curr_obj), handle + offset, buf_size)
+				offset = offset + buf_size
+				if DEBUGGING:
+					print('content: ' + repr(curr_obj.get_raw_bytestring()))
+
+
+
+			# WARNING: PROMOS object has minimal size of 8192, and maximum size is unknown...
+
+			##data = ctypes.c_wchar_p(handle).value
+			#data = bytearray(myBuffer)
+		#else:
+		#	data = bytearray()
+		self.CloseClipboard()
+		#return data
+
+
+
+def main(argv=None):
+	clp = Clipboard()
+	clp.paste_c()
+	#print('Is there a PROMOS object in clipbboard?')
+	# if len(data) > 0:
+	# 	print('YES!')
+	# 	print(repr(data))
+	# else:
+	# 	print('No.')
+
+
+	return 0        # success
+
+
+if __name__ == '__main__':
+	status = main()
+	#sys.exit(status)

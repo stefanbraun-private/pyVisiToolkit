@@ -1,0 +1,16 @@
+v15:           &WINDOW_v15
+  WINDOW:
+    master:
+      _linemark: WIN
+      _obj: str
+      _split: 9
+v16:      &WINDOW_v16
+  <<: *WINDOW_v15
+  # test: overwrite
+#  WINDOW:
+#    master:
+      _linemark: BAR
+v17:     &WINDOW_v17
+  <<: *WINDOW_v15
+  # test: add property
+  foo: 123

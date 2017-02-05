@@ -1,0 +1,261 @@
+#!/usr/bin/env python
+# encoding: utf-8
+"""
+tools.PSC_file_selector.py
+
+Copyright (C) 2016 Stefan Braun
+
+This program is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, either version 2 of the License, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License along with this program. If not, see <http://www.gnu.org/licenses/>.
+"""
+
+import dms.dmspipe
+import os
+import glob
+import Tkinter
+import ttk
+import re
+import time
+import datetime
+
+
+DEBUGGING = True
+
+# based on directory browser using Ttk Treeview.
+# , which based on the demo found in Tk 8.5 library/demos/browse
+# example from http://svn.python.org/projects/python/trunk/Demo/tkinter/ttk/dirbrowser.py
+
+class BrowserGUI(Tkinter.Tk):
+	RE_PATTERN_UNDERSCORE = r'_.*\.psc'
+	RE_PATTERN_ALL_PSC = r'.*\.psc'
+	RE_PATTERN_VLO_COLLECTION = r'VLO-Collection_Part\d+.psc'
+
+	def __init__(self, curr_DMS, curr_image_dp, root_path='.'):
+		Tkinter.Tk.__init__(self)
+		self.minsize(width=800, height=700)
+		self.wm_title("PSC file selector")
+
+		# FIXME: implement checkboxes for showing only "__*.psc" files, hide other files, path in title with "\", directory change with opened tree, no command window in windows, etc.
+		# FIXME: dirty hack (Tkinter callback "self._cb_entry_filepattern" needs this variable)
+		self._curr_tree = None
+		self.file_regex_pattern = Tkinter.StringVar()
+		self.file_regex_pattern.trace('w', self._cb_entry_filepattern)
+
+		entrybox = Tkinter.Entry(self, textvariable=self.file_regex_pattern)
+		entrybox.insert(0, BrowserGUI.RE_PATTERN_UNDERSCORE)
+		entrybox.config(width=80)
+
+		file_regex_label = Tkinter.Label(self, text='Regex-pattern for filenames (re.search):\n=>click on directory "." for recreation of tree!')
+
+		button_frame = Tkinter.Frame(master=self, bd=1, relief='sunken')
+		btn_underscore = Tkinter.Button(button_frame, text='Set Pattern "UNDERSCORE"', command=self._cb_btn_underscore)
+		btn_all_psc = Tkinter.Button(button_frame, text='Set Pattern "ALL_PSC"', command=self._cb_btn_all_psc)
+		btn_vlo_collection = Tkinter.Button(button_frame, text='Set Pattern "VLO_COLLECTION"', command=self._cb_btn_vlo_collection)
+		btn_Quit = Tkinter.Button(button_frame, text='Quit', command=self.quit)
+
+		vsb = ttk.Scrollbar(orient="vertical")
+		hsb = ttk.Scrollbar(orient="horizontal")
+
+		tree = ttk.Treeview(columns=("fullpath", "type", "modified", "size"),
+		    displaycolumns=("modified", "size"), yscrollcommand=lambda f, l: self.autoscroll(vsb, f, l),
+		    xscrollcommand=lambda f, l:self.autoscroll(hsb, f, l))
+
+		# FIXME: quick and dirty: holding reference to this tree widget instance
+		# used by callback function self._cb_checkbox_underscore_files
+		# (it doesn't get's tree-based events, so we have to keep this reference up-to-date)
+		self._curr_tree = tree
+
+		vsb['command'] = tree.yview
+		hsb['command'] = tree.xview
+
+		tree.heading("#0", text="Directory Structure", anchor='w')
+		tree.heading("modified", text="Modification Time", anchor='w')
+		tree.column("modified", stretch=0, width=150)
+		tree.heading("size", text="File Size", anchor='w')
+		tree.column("size", stretch=0, width=100)
+
+		if DEBUGGING:
+			print('root_path=' + str(root_path))
+		#self.populate_roots(tree)
+		self.populate_roots(tree, root_path)
+		tree.bind('<<TreeviewOpen>>', self.update_tree)
+		tree.bind('<Double-Button-1>', self.doubleclick_handler)
+
+		# Arrange the tree and its scrollbars in the toplevel
+		tree.grid(  column=0, row=0, sticky='nswe')
+		vsb.grid(   column=1, row=0, sticky='ns')
+		hsb.grid(   column=0, row=1, sticky='ew')
+
+
+
+
+
+
+
+
+		entrybox.grid(              row=3, column=0, sticky='e', padx=4 , pady=4)
+		file_regex_label.grid(      row=3, column=0, sticky='w', padx=4 , pady=4)
+
+		btn_underscore.pack(side='left')
+		btn_all_psc.pack(side='left')
+		btn_vlo_collection.pack(side='left')
+		# FIXME: Button "btn_Quit" doesn't gets placed on the right side...Why?!?
+		btn_Quit.pack(side='right', padx=30, anchor='e')
+		button_frame.grid(row=4, column=0, sticky='w', padx=4 , pady=4)
+
+		self.grid_columnconfigure(0, weight=1)
+		self.grid_rowconfigure(0, weight=1)
+
+		self._curr_DMS = curr_DMS
+		self._curr_image_dp = curr_image_dp
+
+
+	def populate_tree(self, tree, node):
+		if tree.set(node, "type") != 'directory':
+			return
+
+		path = tree.set(node, "fullpath")
+		tree.delete(*tree.get_children(node))
+
+		parent = tree.parent(node)
+		special_dirs = [] if parent else glob.glob('.') + glob.glob('..')
+
+		for p in special_dirs + os.listdir(path):
+			ptype = None
+			p = os.path.join(path, p).replace('\\', '/')
+			if os.path.isdir(p): ptype = "directory"
+			elif os.path.isfile(p): ptype = "file"
+
+			fname = os.path.split(p)[1]
+			#if DEBUGGING:
+			#    print('fname= ' + str(fname) + ', p= ' + str(p) + ', ptype= ' + str(ptype))
+
+			# BrS, 10.4.2016: problems with umlaut in filename...
+			# https://bytes.com/topic/python/answers/34606-how-display-unicode-label-tkinter
+			#id = tree.insert(node, "end", text=fname, values=[p, ptype])
+			fname = unicode(fname, 'iso8859-1')
+			p = unicode(p, 'iso8859-1')
+
+			if ptype == 'directory':
+				id = tree.insert(node, "end", text=fname, values=[p, ptype])
+				if fname not in ('.', '..'):
+					tree.insert(id, 0, text="dummy")
+					tree.item(id, text=fname)
+			elif ptype == 'file':
+				if re.search(self.file_regex_pattern.get(), fname):
+					id = tree.insert(node, "end", text=fname, values=[p, ptype])
+					size = os.stat(p).st_size
+					# file modified time: http://stackoverflow.com/questions/237079/how-to-get-file-creation-modification-date-times-in-python
+					modified_time = datetime.datetime.fromtimestamp(os.stat(p).st_mtime)
+					tree.set(id, "size", "%d bytes" % size)
+					tree.set(id, "modified", "%s" % modified_time)
+
+
+	def populate_roots(self, tree, root_path = '.'):
+		# FIXME: when called by checkbox-value callback, then other root nodes were attached...
+		# FIXME: create opened tree every time we call this function
+		dir = os.path.abspath(root_path).replace('\\', '/')
+		node = tree.insert('', 'end', text=dir, values=[dir, "directory"])
+		self.populate_tree(tree, node)
+
+	def update_tree(self, event):
+		# DEBUGGING
+		#print('"event": type is ' + repr(type(event)) + ', vars(event):' + repr(vars(event)))
+		tree = event.widget
+		self._curr_tree = tree
+		self.populate_tree(tree, tree.focus())
+
+	def doubleclick_handler(self, event):
+		tree = event.widget
+		node = tree.focus()
+		if tree.parent(node):
+			path = os.path.abspath(tree.set(node, "fullpath"))
+			if os.path.isdir(path):
+				# directory change
+				os.chdir(path)
+				tree.delete(tree.get_children(''))
+				self._curr_tree = tree
+				self.populate_roots(tree)
+			else:
+				# set this file in GE (Grafikeditor) if possible
+				if path.split('.')[-1].upper() == 'PSC':
+					# write filename to the right DMS datapoint
+					self._curr_DMS.pyDMS_WriteSTREx(self._curr_image_dp, path)
+				else:
+					print('"Grafikeditor" displays only PSC files...')
+
+
+	def _cb_entry_filepattern(self, *args):
+		#print('"_cb_entry_filepattern()" was called...')
+		print('value of "self.file_regex_pattern" is ' + str(self.file_regex_pattern.get()))
+
+		# FIXME: these calls don't work as expected... Workaround: user has to recreate tree by clicking on directory "."
+		#self._curr_tree.delete(self._curr_tree.get_children(''))
+		#tree = self._curr_tree
+		#self.populate_roots(tree)
+
+		# FIXME: quick and dirty way..
+		# based on example from http://stackoverflow.com/questions/270648/tkinter-invoke-event-in-main-loop
+		# doesn't work....
+		#if self._curr_tree:
+		#	self.event_generate("<<TreeviewOpen>>", when="tail", widget=self._curr_tree)
+		#if self._curr_tree:
+		#	self.populate_tree(self._curr_tree, self._curr_tree.focus())
+
+	def _cb_btn_underscore(self, *args):
+		self.file_regex_pattern.set(BrowserGUI.RE_PATTERN_UNDERSCORE )
+
+	def _cb_btn_all_psc(self, *args):
+		self.file_regex_pattern.set(BrowserGUI.RE_PATTERN_ALL_PSC)
+
+	def _cb_btn_vlo_collection(self, *args):
+		self.file_regex_pattern.set(BrowserGUI.RE_PATTERN_VLO_COLLECTION)
+
+	def autoscroll(self, sbar, first, last):
+		"""Hide and show scrollbar as needed."""
+		first, last = float(first), float(last)
+		if first <= 0 and last >= 1:
+			sbar.grid_remove()
+		else:
+			sbar.grid()
+		sbar.set(first, last)
+
+
+
+def main(argv=None):
+
+	curr_dms = dms.dmspipe.Dmspipe()
+
+	prj = curr_dms.pyDMS_ReadSTREx('System:Project')
+	computer = curr_dms.pyDMS_ReadSTREx('System:NT:Computername')
+	if DEBUGGING:
+		print('prj=' + prj)
+		print('computer=' + computer)
+
+	print('PSC_file_selector.py')
+	print('*******************')
+	print('\tChoose on second GUI which PSC file is displayed in GE (Grafikeditor)')
+
+
+	curr_psc = curr_dms.pyDMS_ReadSTREx('System:Node:' + computer + ':Image')
+	curr_ReInit = curr_dms.pyDMS_ReadSTREx('System:Node:' + computer + ':ImgReInit')
+	curr_prj = curr_dms.pyDMS_ReadSTREx('System:Project')
+
+	filename = os.path.join(curr_prj, 'scr' , curr_psc)
+	#curr_visuparser = visu.psc.Parser.PscFile(filename)
+	#curr_visuparser.parse_file()
+
+	curr_image_dp = 'System:Node:' + computer + ':Image'
+	curr_src_path = os.path.join(curr_prj, 'scr')
+	root = BrowserGUI(curr_dms, curr_image_dp, curr_src_path)
+	root.mainloop()
+
+	return 0        # success
+
+
+if __name__ == '__main__':
+	status = main()
+	# sys.exit(status)

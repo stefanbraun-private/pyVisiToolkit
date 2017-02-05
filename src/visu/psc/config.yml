@@ -1,0 +1,592 @@
+# config.yml
+# visu.psc.ParserConfig.py
+# (part of pyVisiToolkit)
+#
+# help for YAML: https://learnxinyminutes.com/docs/yaml/
+#                https://symfony.com/doc/current/components/yaml/yaml_format.html
+# =>indention is always done with two spaces, no tabs!
+#
+# =>about inheritation: referencing to an anchor means copying this node or attribut to the second position
+#   behaviour of second position:
+#     -adding new attributes does work
+#     -when replacing an attribute then whole node tree gets replaced with this new data... no overwriting with some changed values possible... :-/
+#
+#
+# structure/nesting of configuration file:
+# <PSC graph element> <version> <property> <PSC CSV details>
+#
+# explanation:
+# <PSC graph element>   WINDOW, Line, Button, ...
+# <version>     v15 (version 1.5), v16, v17, ...
+# <property>    id, bmo-class, group, ...
+# <PSC CSV details> linemark (WIN, ID, LIB, PSDV, ...), location details and which Python object represents this data
+#
+# list of known Python objects (from Parser.py):
+# str:  PscVar_str
+# int:  PscVar_int
+# float: PscVar_float
+# bool: PscVar_bool
+# rectangle: PscVar_rectangle
+# line_style: PscVar_line_style
+# value_rgb_pairs: PscVar_value_rgb_pairs
+# RGB: RGB
+#
+# possible location details:
+#
+# "_split: 9"   means 9th CSV part
+# "_split: <list>"   means more than one CSV part to assemble one Python object
+#
+# "_split_listobject: (nof-objects-index, start-index, length-per-object)"     assembles a variable-length Python object containing a list of elements
+#
+# "_split_bit: (CSV-index, bitfield-index)"   addressing one bit in one specific CSV part
+#
+# "_regexpattern": <string> match of regex pattern has to contain three groups: <string before value> <value> <string after value>
+#
+#
+# ==>handling of values stored in more than one fields:
+# linemark is "MULTIPOS"
+#
+# location details is a reference to involved properties:
+# "_reference: <list>"  means a list of properties, the first one is original, other ones are copies from this property
+
+
+WINDOW:
+  v15:      &WINDOW_v15
+    master:
+      _linemark: WIN
+      _obj: str
+      _split: 9
+    color-bg:
+      _linemark: WIN
+      _obj: RGB
+      _split: 6
+    title:
+      _linemark: WIN
+      _obj: str
+      _split: 8
+    scrollbar-horizontal:       &scrollbar-horizontal_v15
+      _linemark: WIN
+      _obj: bool
+      _split_bit:
+      - 7
+      - 3
+    scrollbar-vertical:
+      <<:  *scrollbar-horizontal_v15
+      _split_bit:
+      - 7
+      - 2
+    maximized:
+      <<:  *scrollbar-horizontal_v15
+      _split_bit:
+      - 7
+      - 1
+
+  v16:   &WINDOW_v16
+    <<:  *WINDOW_v15
+  v17:   &WINDOW_v17
+    <<:  *WINDOW_v16
+
+
+GENERIC:    &GENERIC
+  v15:      &GENERIC_v15
+    bmo-library:
+      _linemark: LIB
+      _obj: str
+      _split: 1
+    bmo-class:
+      _linemark: LIB
+      _obj: str
+      _split: 2
+    bmo-class-key:
+      _linemark: LIB
+      _obj: str
+      _split: 4
+    bmo-instance:
+      _linemark: LIB
+      _obj: str
+      _split: 3
+    group:
+      _linemark: PSDV
+      _obj: int
+      _split: 11
+    id:
+      _linemark: ID
+      _obj: str
+      _split: 2
+    selection-area:
+      _linemark: PSDV
+      _obj: rectangle
+      _split:
+      - 1
+      - 2
+      - 3
+      - 4
+    visibility:
+      _linemark: PSDV
+      _obj: bool
+      _split: 6
+    init-visibility-dmskey:
+      _linemark: ISB
+      _obj: str
+      _split: 1
+    init-visibility-is-inversed:
+      _linemark: ISB
+      _obj: bool
+      _split: 2
+
+  v16:   &GENERIC_v16
+    <<:  *GENERIC_v15
+
+  v17:   &GENERIC_v17
+    <<:  *GENERIC_v16
+
+
+
+# access rights
+# on elements where user can change values, start programs, navigate
+# there are 16 userlevels and 8 facility levels
+# and a value for hiding elements when access is forbidden
+ACCESS_RIGHTS:      &ACCESS_RIGHTS
+  v15:              &ACCESS_RIGHTS_v15
+    accessrights-userlevel01:      &accessrights-userlevel01
+      _linemark: ISA
+      _obj: bool
+      _split_bit:
+      - 24
+      - 0
+    accessrights-userlevel02:
+      <<: *accessrights-userlevel01
+      _split_bit:
+      - 24
+      - 1
+    accessrights-userlevel03:
+      <<: *accessrights-userlevel01
+      _split_bit:
+      - 24
+      - 2
+    accessrights-userlevel04:
+      <<: *accessrights-userlevel01
+      _split_bit:
+      - 24
+      - 3
+    accessrights-userlevel05:
+      <<: *accessrights-userlevel01
+      _split_bit:
+      - 24
+      - 4
+    accessrights-userlevel06:
+      <<: *accessrights-userlevel01
+      _split_bit:
+      - 24
+      - 5
+    accessrights-userlevel07:
+      <<: *accessrights-userlevel01
+      _split_bit:
+      - 24
+      - 6
+    accessrights-userlevel08:
+      <<: *accessrights-userlevel01
+      _split_bit:
+      - 24
+      - 7
+    accessrights-userlevel09:
+      <<: *accessrights-userlevel01
+      _split_bit:
+      - 24
+      - 8
+    accessrights-userlevel10:
+      <<: *accessrights-userlevel01
+      _split_bit:
+      - 24
+      - 9
+    accessrights-userlevel11:
+      <<: *accessrights-userlevel01
+      _split_bit:
+      - 24
+      - 10
+    accessrights-userlevel12:
+      <<: *accessrights-userlevel01
+      _split_bit:
+      - 24
+      - 11
+    accessrights-userlevel13:
+      <<: *accessrights-userlevel01
+      _split_bit:
+      - 24
+      - 12
+    accessrights-userlevel14:
+      <<: *accessrights-userlevel01
+      _split_bit:
+      - 24
+      - 13
+    accessrights-userlevel15:
+      <<: *accessrights-userlevel01
+      _split_bit:
+      - 24
+      - 14
+    accessrights-userlevel16:
+      <<: *accessrights-userlevel01
+      _split_bit:
+      - 24
+      - 15
+
+  v16:           &ACCESS_RIGHTS_v16
+    <<:          *ACCESS_RIGHTS_v15
+    accessrights-facilitylevel01:      &accessrights-facilitylevel01
+      _linemark: ISA
+      _obj: bool
+      _split_bit:
+      - 24
+      - 16
+    accessrights-facilitylevel02:
+      <<: *accessrights-facilitylevel01
+      _split_bit:
+      - 24
+      - 17
+    accessrights-facilitylevel03:
+      <<: *accessrights-facilitylevel01
+      _split_bit:
+      - 24
+      - 18
+    accessrights-facilitylevel04:
+      <<: *accessrights-facilitylevel01
+      _split_bit:
+      - 24
+      - 19
+    accessrights-facilitylevel05:
+      <<: *accessrights-facilitylevel01
+      _split_bit:
+      - 24
+      - 20
+    accessrights-facilitylevel06:
+      <<: *accessrights-facilitylevel01
+      _split_bit:
+      - 24
+      - 21
+    accessrights-facilitylevel07:
+      <<: *accessrights-facilitylevel01
+      _split_bit:
+      - 24
+      - 22
+    accessrights-facilitylevel08:
+      <<: *accessrights-facilitylevel01
+      _split_bit:
+      - 24
+      - 23
+    accessrights-hide-forbidden-elem:
+      _linemark: ISA
+      _obj: bool
+      _split_bit:
+      - 24
+      - 23
+  v17:           &ACCESS_RIGHTS_v17
+    <<:          *ACCESS_RIGHTS_v16
+
+
+# all common text properties
+TEXT:             &TEXT
+  v15:            &TEXT_v15
+    text-string:
+      _linemark: DIV
+      _obj: str
+      _regexpattern: (DIV;\d+;\d+;)(.*)(;\d+)
+  v16:    &TEXT_v16
+    <<:   *TEXT_v15
+  v17:    &TEXT_v17
+    <<:   *TEXT_v16
+
+
+# misc properties used more than once
+ENDPOINTS:               &ENDPOINTS
+  endpoints:
+    _linemark: PSDV
+    _obj: rectangle
+    _split:
+    - 1
+    - 2
+    - 3
+    - 4
+  init_endpoint-x1_dmskey:
+    _linemark: IX1
+    _obj: str
+    _split: 1
+  init_endpoint-x1_ref-a:
+    _linemark: IX1
+    _obj: float
+    _split: 2
+  init_endpoint-x1_pos-a:
+    _linemark: IX1
+    _obj: int
+    _split: 4
+  init_endpoint-x1_ref-b:
+    _linemark: IX1
+    _obj: float
+    _split: 3
+  init_endpoint-x1_pos-b:
+    _linemark: IX1
+    _obj: int
+    _split: 5
+  init_endpoint-y1_dmskey:
+    _linemark: IY1
+    _obj: str
+    _split: 1
+  init_endpoint-y1_ref-a:
+    _linemark: IY1
+    _obj: float
+    _split: 2
+  init_endpoint-y1_pos-a:
+    _linemark: IY1
+    _obj: int
+    _split: 4
+  init_endpoint-y1_ref-b:
+    _linemark: IY1
+    _obj: float
+    _split: 3
+  init_endpoint-y1_pos-b:
+    _linemark: IY1
+    _obj: int
+    _split: 5
+  init_endpoint-x2_dmskey:
+    _linemark: IX2
+    _obj: str
+    _split: 1
+  init_endpoint-x2_ref-a:
+    _linemark: IX2
+    _obj: float
+    _split: 2
+  init_endpoint-x2_pos-a:
+    _linemark: IX2
+    _obj: int
+    _split: 4
+  init_endpoint-x2_ref-b:
+    _linemark: IX2
+    _obj: float
+    _split: 3
+  init_endpoint-x2_pos-b:
+    _linemark: IX2
+    _obj: int
+    _split: 5
+  init_endpoint-y2_dmskey:
+    _linemark: IY2
+    _obj: str
+    _split: 1
+  init_endpoint-y2_ref-a:
+    _linemark: IY2
+    _obj: float
+    _split: 2
+  init_endpoint-y2_pos-a:
+    _linemark: IY2
+    _obj: int
+    _split: 4
+  init_endpoint-y2_ref-b:
+    _linemark: IY2
+    _obj: float
+    _split: 3
+  init_endpoint-y2_pos-b:
+    _linemark: IY2
+    _obj: int
+    _split: 5
+
+COLOR_FG:                &COLOR_FG
+  color-fg:
+    _linemark: PEN
+    _obj: RGB
+    _split: 2
+  init_color-fg_dmskey:
+    _linemark: IVG
+    _obj: str
+    _split: 1
+  init_color-fg_false:
+    _linemark: IVG
+    _obj: RGB
+    _split: 2
+  init_color-fg_true:
+    _linemark: IVG
+    _obj: RGB
+    _split: 3
+  init_color-fg_from-n_dmskey:
+    _linemark: IVGN
+    _obj: str
+    _split: 2
+  init_color-fg_from-n_gradient:
+    _linemark: IVGN
+    _obj: bool
+    _split: 3
+  init_color-fg_from-n_val-rgb-pairs:
+    _linemark: IVGN
+    _obj: value_rgb_pairs
+    _split_listobject:
+    - 1
+    - 4
+    - 2
+
+COLOR_BG:                &COLOR_BG
+  color-bg:
+    _linemark: PEN
+    _obj: RGB
+    _split: 11
+
+
+
+
+LINE-STYLE:              &LINE-STYLE
+  line-style:
+    _linemark: MULTIPOS
+    _obj: line_style
+    _reference:
+    - line-style_orig
+    - line-style_copy1
+
+  line-style_orig:
+    _linemark: PSDV
+    _obj: line_style
+    _split: 9
+
+  line-style_copy1:
+    _linemark: PEN
+    _obj: line_style
+    _split: 3
+
+LINE-WIDTH:              &LINE-WIDTH
+  line-width:
+    _linemark: MULTIPOS
+    _obj: int
+    _reference:
+    - line-width_orig
+    - line-width_copy1
+
+  line-width_orig:
+    _linemark: PEN
+    _obj: int
+    _split: 4
+
+  line-width_copy1:
+    _linemark: PEN
+    _obj: int
+    _split: 5
+
+
+# PSC graphic elements:
+Line:
+  v15:
+    <<:     *GENERIC_v15
+    <<:     *ENDPOINTS
+    <<:     *COLOR_FG
+    <<:     *LINE-STYLE
+    <<:     *LINE-WIDTH
+  v16:
+    <<:     *GENERIC_v16
+  v17:
+    <<:     *GENERIC_v17
+Button:
+  v15:
+    <<:     *GENERIC_v15
+    <<:     *ACCESS_RIGHTS_v15
+  v16:
+    <<:     *GENERIC_v16
+    <<:     *ACCESS_RIGHTS_v16
+  v17:
+    <<:     *GENERIC_v17
+    <<:     *ACCESS_RIGHTS_v17
+Checkbox:
+  v15:
+    <<:     *GENERIC_v15
+    <<:     *ACCESS_RIGHTS_v15
+  v16:
+    <<:     *GENERIC_v16
+    <<:     *ACCESS_RIGHTS_v16
+  v17:
+    <<:     *GENERIC_v17
+    <<:     *ACCESS_RIGHTS_v17
+Circle:
+  v15:
+    <<:     *GENERIC_v15
+  v16:
+    <<:     *GENERIC_v16
+  v17:
+    <<:     *GENERIC_v17
+Combobox:
+  v15:
+    <<:     *GENERIC_v15
+    <<:     *ACCESS_RIGHTS_v15
+  v16:
+    <<:     *GENERIC_v16
+    <<:     *ACCESS_RIGHTS_v16
+  v17:
+    <<:     *GENERIC_v17
+    <<:     *ACCESS_RIGHTS_v17
+Editbox:
+  v15:
+    <<:     *GENERIC_v15
+    <<:     *ACCESS_RIGHTS_v15
+  v16:
+    <<:     *GENERIC_v16
+    <<:     *ACCESS_RIGHTS_v16
+  v17:
+    <<:     *GENERIC_v17
+    <<:     *ACCESS_RIGHTS_v17
+Icon:
+  v15:
+    <<:     *GENERIC_v15
+    <<:     *ACCESS_RIGHTS_v15
+  v16:
+    <<:     *GENERIC_v16
+    <<:     *ACCESS_RIGHTS_v16
+  v17:
+    <<:     *GENERIC_v17
+    <<:     *ACCESS_RIGHTS_v17
+Polyline:
+  v15:
+    <<:     *GENERIC_v15
+  v16:
+    <<:     *GENERIC_v16
+  v17:
+    <<:     *GENERIC_v17
+Radio Button:
+  v15:
+    <<:     *GENERIC_v15
+    <<:     *ACCESS_RIGHTS_v15
+  v16:
+    <<:     *GENERIC_v16
+    <<:     *ACCESS_RIGHTS_v16
+  v17:
+    <<:     *GENERIC_v17
+    <<:     *ACCESS_RIGHTS_v17
+Rectangle:
+  v15:
+    <<:     *GENERIC_v15
+  v16:
+    <<:     *GENERIC_v16
+  v17:
+    <<:     *GENERIC_v17
+Round Rectangle:
+  v15:
+    <<:     *GENERIC_v15
+  v16:
+    <<:     *GENERIC_v16
+  v17:
+    <<:     *GENERIC_v17
+Ruler:
+  v15:
+    <<:     *GENERIC_v15
+  v16:
+    <<:     *GENERIC_v16
+  v17:
+    <<:     *GENERIC_v17
+Text:
+  v15:
+    <<:     *GENERIC_v15
+    <<:     *TEXT_v15
+  v16:
+    <<:     *GENERIC_v16
+    <<:     *TEXT_v16
+  v17:
+    <<:     *GENERIC_v17
+    <<:     *TEXT_v17
+Trend:
+  v15:
+    <<:     *GENERIC_v15
+  v16:
+    <<:     *GENERIC_v16
+  v17:
+    <<:     *GENERIC_v17
