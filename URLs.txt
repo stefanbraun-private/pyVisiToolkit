@@ -1,0 +1,10 @@
+
+
+official development documentation
+----------------------------------
+
+=>access to DMS/PDBS via internal DLLs
+
+"ProMoS Development2.pdf"
+(c) 2008 MST Systemtechnik AG
+http://www.promosnt.ch/sites/default/files/forum/ProMoS%20Development2.pdf
