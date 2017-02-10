@@ -168,6 +168,9 @@ class DBData(ctypes.Structure):
 	def getTimestampString(self):
 		return time.strftime("%a, %d %b %Y %H:%M:%S", time.localtime(self._timestamp))
 
+	def getStatus(self):
+		return self._status
+
 	def get_statusbits_set(self):
 		curr_bits = DBData.Statusbit_class()
 		curr_bits.asLong = self._status
