@@ -34,7 +34,7 @@ import codecs
 import subprocess
 import misc.clipboard
 
-ROOTWINDOW_TITLE = u'PSC file selector v0.2.0'
+ROOTWINDOW_TITLE = u'PSC file selector v0.2.1'
 USAGE_HINT_TEXT = u'Usage hints: double-click = open in GE // right-click = context-menu // header-click = sorting columns'
 
 
@@ -154,15 +154,33 @@ class Dirlister(object):
 	def __init__(self, path):
 		self._path = path
 		self._filehandler = PscFileHandler()
+		self._re_fname_compiled = re.compile('')
+		self._re_string_compiled = re.compile('')
 
-	def get_listing(self, re_fname_pattern='', re_string_pattern='', sort_item=0, reversed=False):
+	def set_re_fname_pattern(self, re_fname_pattern):
+		"""
+		compile Regex pattern
+		(it's not for better performance, but then GUI can handle exceptions when user enters wrong Regex-syntax)
+		=>must be called when pattern needs an update before get_listing()
+		"""
+		self._re_fname_compiled = re.compile(re_fname_pattern)
+
+	def set_re_string_pattern(self, re_string_pattern):
+		"""
+		compile Regex pattern
+		(it's not for better performance, but then GUI can handle exceptions when user enters wrong Regex-syntax)
+		=>must be called when pattern needs an update before get_listing()
+		"""
+		self._re_string_compiled = re.compile(re_string_pattern)
+
+	def get_listing(self, sort_item=0, reversed=False):
 		# collecting filenames
 		self._filehandler.clear_file_selection()
 		for entry in os.listdir(self._path):
 			fullpath = os.path.join(self._path, entry)
 			if os.path.isfile(fullpath):
 				if entry.split(os.extsep)[-1].upper() == u'PSC':
-					if re.search(re_fname_pattern, entry):
+					if self._re_fname_compiled.search(entry):
 						# regex search returned a match object =>mark filename for further filtering
 						self._filehandler.select_file(entry, fullpath)
 
@@ -171,7 +189,7 @@ class Dirlister(object):
 		# (currently only a very basic textsearch)
 		for filename in self._filehandler.get_file_selection():
 			curr_file = self._filehandler.get_file(filename)
-			if not re.search(re_string_pattern, curr_file.get_whole_file()):
+			if not self._re_string_compiled.search(curr_file.get_whole_file()):
 				# regex search didn't returned a match object...
 				self._filehandler.deselect_file(filename)
 
@@ -224,15 +242,15 @@ class FileSelectorGUI(Tkinter.Tk):
 		self.string_regex_pattern = Tkinter.StringVar()
 		self.string_regex_pattern.trace('w', self._cb_entry_stringpattern)
 
-		file_regex_entrybox = Tkinter.Entry(self, textvariable=self.file_regex_pattern)
-		file_regex_entrybox.insert(0, FileSelectorGUI.RE_PATTERN_UNDERSCORE)
-		file_regex_entrybox.config(width=80)
+		self.file_regex_entrybox = Tkinter.Entry(self, textvariable=self.file_regex_pattern, bg="green")
+		self.file_regex_entrybox.insert(0, FileSelectorGUI.RE_PATTERN_UNDERSCORE)
+		self.file_regex_entrybox.config(width=80)
 
 		file_regex_label = Tkinter.Label(self, text=u'Regex-pattern for filenames (re.search):')
 
-		string_regex_entrybox = Tkinter.Entry(self, textvariable=self.string_regex_pattern)
-		string_regex_entrybox.insert(0, '')
-		string_regex_entrybox.config(width=80)
+		self.string_regex_entrybox = Tkinter.Entry(self, textvariable=self.string_regex_pattern, bg="green")
+		self.string_regex_entrybox.insert(0, '')
+		self.string_regex_entrybox.config(width=80)
 
 		string_regex_label = Tkinter.Label(self, text=u'Regex-pattern for strings (re.search):')
 
@@ -258,10 +276,10 @@ class FileSelectorGUI(Tkinter.Tk):
 		usage_label = Tkinter.Label(self, text=USAGE_HINT_TEXT, font="-weight bold")
 		usage_label.grid(row=2, column=0, sticky='w', padx=4, pady=8)
 
-		file_regex_entrybox.grid(row=3, column=0, sticky='e', padx=4 , pady=4)
+		self.file_regex_entrybox.grid(row=3, column=0, sticky='e', padx=4 , pady=4)
 		file_regex_label.grid(row=3, column=0, sticky='w', padx=4 , pady=4)
 
-		string_regex_entrybox.grid(row=4, column=0, sticky='e', padx=4 , pady=4)
+		self.string_regex_entrybox.grid(row=4, column=0, sticky='e', padx=4 , pady=4)
 		string_regex_label.grid(row=4, column=0, sticky='w', padx=4 , pady=4)
 
 		btn_underscore.pack(side='left')
@@ -316,9 +334,7 @@ class FileSelectorGUI(Tkinter.Tk):
 				self.tree.delete(item)
 
 			# fill tree with content
-			for mytuple in self._dirlister.get_listing(re_fname_pattern=self.file_regex_pattern.get(),
-			                                           re_string_pattern=self.string_regex_pattern.get(),
-			                                           sort_item=self._sort_by_column_no,
+			for mytuple in self._dirlister.get_listing(sort_item=self._sort_by_column_no,
 			                                           reversed=self._inverse_sorting):
 				if len(mytuple) == 4:
 					# problems with umlaut in filename...
@@ -440,7 +456,14 @@ class FileSelectorGUI(Tkinter.Tk):
 
 
 	def _cb_entry_filepattern(self, *args):
-		self.populate_tree()
+		try:
+			self._dirlister.set_re_fname_pattern(self.file_regex_pattern.get())
+			self.file_regex_entrybox.configure(bg="green")
+			self.populate_tree()
+		except:
+			# Regex must have wrong syntax... =>give user a feedback
+			# changing colors in a widget: hint from http://stackoverflow.com/questions/13588908/dynamically-change-widget-background-color-in-tkinter
+			self.file_regex_entrybox.configure(bg="red")
 
 		## hint from http://stackoverflow.com/questions/8036499/unicodewarning-special-characters-in-tkinter
 		#mystr = self.file_regex_pattern.get()
@@ -456,7 +479,14 @@ class FileSelectorGUI(Tkinter.Tk):
 
 
 	def _cb_entry_stringpattern(self, *args):
-		self.populate_tree()
+		try:
+			self._dirlister.set_re_string_pattern(self.string_regex_pattern.get())
+			self.string_regex_entrybox.configure(bg="green")
+			self.populate_tree()
+		except:
+			# Regex must have wrong syntax... =>give user a feedback
+			# changing colors in a widget: hint from http://stackoverflow.com/questions/13588908/dynamically-change-widget-background-color-in-tkinter
+			self.string_regex_entrybox.configure(bg="red")
 
 		# # hint from http://stackoverflow.com/questions/8036499/unicodewarning-special-characters-in-tkinter
 		# mystr = self.string_regex_pattern.get()
