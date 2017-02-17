@@ -22,6 +22,7 @@ import struct
 import time
 import os
 import yaml
+import datetime
 
 DBDATA_STATUSBITS_YAML = r'c:\PyVisiToolkit_DBData_Statusbits.yml'
 statusbits_namelist = []
@@ -125,6 +126,8 @@ class DBData(ctypes.Structure):
 		("status", ctypes.c_uint)]
 
 	# hold reference to statusbit class for better performance
+	# FIXME: first time call to DBData.Statusbit_class().get_statusbits_namelist() crashes when no DBData constructor created "Statusbit_class"...
+	# FIXME: =>how can we do this in a cleaner way with better incapsulation?
 	Statusbit_class = None
 
 	@classmethod
@@ -132,48 +135,27 @@ class DBData(ctypes.Structure):
 		if not cls.Statusbit_class:
 			cls.Statusbit_class = get_status_class()
 
-	def __init__(self, bytestring=None):
-		ctypes.Structure.__init__(self)
-		if bytestring == None:
-			self._timestamp = 0
-			self._value = 0.0
-			self._status = 0
-		else:
-			# initialisation by raw bytestring...
-			# assuming len(bytestring) == calcsize(TrendData.STRUCT_FORMAT) ...
-			oneTrendData = struct.unpack(DBData.STRUCT_FORMAT, bytestring)
-			self._timestamp = oneTrendData[0]
-			self._value = oneTrendData[1]
-			self._status = oneTrendData[2]
+	def __init__(self, *kargs, **kwargs):
+		ctypes.Structure.__init__(self, *kargs, **kwargs)
 		DBData.load_statusbit_class()
-
-	def setVariables(self, timestamp, value, status):
-		# initialisation by ctypes...?!?
-		self._timestamp = int(timestamp)
-		self._value = float(value)
-		self._status = int(status)
 
 	def __str__(self):
 		# a simple string prasentation
-		return 'timestamp=' + str(self._timestamp) + '=' + time.strftime("%a, %d %b %Y %H:%M:%S", time.localtime(
-			self._timestamp)) + '\tvalue=' + str(self._value) + '\tstatus=' + str(
-			self._status) + ' (' + self.getStatusFlagsString() + ')'
+		return 'timestamp=' + str(self.timestamp) + '\tvalue=' + str(self.value) + '\tstatus=' + str(
+			self.status) + ' (' + self.getStatusBitsString() + ')'
 
 	def getValue(self, offset=0, corrFactor=1.0):
-		return corrFactor * (self._value + float(offset))
+		return corrFactor * (self.value + float(offset))
 
 	def getTimestamp(self):
-		return self._timestamp
-
-	def getTimestampString(self):
-		return time.strftime("%a, %d %b %Y %H:%M:%S", time.localtime(self._timestamp))
+		return self.timestamp
 
 	def getStatus(self):
-		return self._status
+		return self.status
 
 	def get_statusbits_set(self):
 		curr_bits = DBData.Statusbit_class()
-		curr_bits.asLong = self._status
+		curr_bits.asLong = self.status
 
 		# generate a set containing only active statusbits
 		# (if available insert named and unnamed statusbits)
@@ -191,3 +173,26 @@ class DBData(ctypes.Structure):
 
 	def getStatusBitsString(self):
 		return ', '.join(self.get_statusbits_set())
+
+
+
+class HighLevelDBData(DBData):
+	"""
+	Interpret the raw data in DBData as datetime-object and value in a datatype
+	https://docs.python.org/2/library/datetime.html
+	"""
+	def __init__(self, *kargs, **kwargs):
+		DBData.__init__(*kargs, **kwargs)
+
+	def get_datetime(self):
+		# hints: https://docs.python.org/2/library/datetime.html#datetime.datetime
+		return datetime.datetime.fromtimestamp(self.timestamp)
+
+	def get_value_as_boolean(self):
+		return self.value > 0.0
+
+	def get_value_as_int(self):
+		return int(self.value)
+
+	def get_value_as_float(self):
+		return self.value

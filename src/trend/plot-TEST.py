@@ -28,7 +28,7 @@ from trend.datasource import trendfile as trf
 
 def main(argv=None):
 
-    currTrf = trf.Trendfile("D:\Trend\S0622_G01428_702_T01_C01_P01_U_L1.hdb")
+    currTrf = trf.RawTrendfile("D:\Trend\S0622_G01428_702_T01_C01_P01_U_L1.hdb")
 
     # create float array
     myArr = array.array('f')

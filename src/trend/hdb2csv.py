@@ -18,7 +18,7 @@ You should have received a copy of the GNU General Public License along with thi
 
 
 from trend.datasource.dbdata import DBData
-from trend.datasource.trendfile import Trendfile
+from trend.datasource.trendfile import RawTrendfile
 import struct
 import time
 import argparse
@@ -27,42 +27,20 @@ import argparse
 DEBUGGING = True
 
 
-
-
 class Converter(object):
 	def __init__(self, hdb_filename, csv_filename):
 		self._hdb_filename = hdb_filename
 		self._csv_filename = csv_filename
 		self._DBData_list = []
 
-	def _read_hdb(self):
-		with open(self._hdb_filename, "rb") as f:
-			# read DMS datapoint name
-			bytestring = f.read(Trendfile.TRENDDATA_OFFSET)
-			if bytestring != "":
-				# size of DMS-datapoint is AFAIK max. 80 characters, but simply convert whole bytestring to a usable python string,
-				# then treat first NULL char as terminator
-				# http://stackoverflow.com/questions/5074043/convert-zero-padded-bytes-to-utf-8-string
-				structFormatstring = str(len(bytestring)) + 'c'
-				self._dmsDatapoint = b''.join(struct.unpack(structFormatstring, bytestring)).split(b'\0', 1)[0]
-				if DEBUGGING:
-					print('found DMS datapoint "' + str(self._dmsDatapoint) + '"\n')
-
-				# FIXME: more efficient reading: calculate number of DBData elements, create a ctypes.Structure with array of DBData elements (dynamic created class)
-				nofBytesTrendStruct = struct.calcsize(DBData.STRUCT_FORMAT)
-
-				bytestring = f.read(nofBytesTrendStruct)
-				while bytestring != "":
-					self._DBData_list.append(DBData(bytestring))
-					bytestring = f.read(nofBytesTrendStruct)
-
-
-	def _write_csv(self):
+	def convert(self):
+		curr_trf = RawTrendfile(self._hdb_filename)
 		with open(self._csv_filename, "w") as f:
 			# write headerline
-			header_cells = ["DMS-Datenpunkt", self._dmsDatapoint, "Status"]
+			header_cells = ["Datum/Zeit", curr_trf.get_dms_Datapoint(), "Status"]
 
 			# if available insert statusbit names instead of their bitnumber
+			DBData.load_statusbit_class()
 			all_statusbits_list = DBData.Statusbit_class().get_statusbits_namelist()
 			if not all_statusbits_list:
 				all_statusbits_list = DBData.Statusbit_class().get_statusbits_unnamedlist()
@@ -71,7 +49,7 @@ class Converter(object):
 			f.write(';'.join(header_cells))
 			f.write('\n')
 
-			for item in self._DBData_list:
+			for item in curr_trf.get_dbdata_elements():
 				# help from http://stackoverflow.com/questions/12400256/python-converting-epoch-time-into-the-datetime
 				timestamp_str = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(item.getTimestamp()))
 				value_str = str(item.getValue())
@@ -88,19 +66,8 @@ class Converter(object):
 				f.write(';'.join(curr_row))
 				f.write('\n')
 
-	def convert(self):
-		self._read_hdb()
-		self._write_csv()
-
 
 def main(argv=None):
-	##hdb_filename = r'D:\Trenddaten\Month_11.2016\Messkoffer01_Allg_Aussentemp_Istwert.hdb'
-	#hdb_filename = r'C:\Promos15\proj\Winterthur_MFH_Schaffhauserstrasse\dat\MSR01_Allg_Aussentemp_Istwert.hdb'
-	#csv_filename = r'D:\test.csv'
-	#print('conversion: ' + hdb_filename + ' ==>> ' + csv_filename)
-	#myconverter = Converter(hdb_filename, csv_filename)
-	#myconverter.convert()
-	#print('\tdone.')
 
 	DIR = r'D:\Trenddaten\Month_02.2017'
 	job_list = [(r'NS_MSR01a_H01_AussenTemp_Istwert.hdb', 'H01_AussenTemp'),

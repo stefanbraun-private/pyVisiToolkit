@@ -63,7 +63,7 @@ def main(argv=None):
 
 	trdFilename = r'C:\Promos16\proj\Asenta_Messkoffer_01\dat\Messkoffer01_TEMP_TF07_Messung_Istwert.hdb'
 	print('\n*** getting Trenddata from raw file (Visi.Plus Dat-directory) "' + trdFilename + '"')
-	currTrf = trf.Trendfile(trdFilename, collectAll=True)
+	currTrf = trf.RawTrendfile(trdFilename, collectAll=True)
 
 	###################### raw trenddata from file ##################
 	print('Writing raw datapoints into file "' + filename_export_trendfile_str + '"' )
@@ -102,7 +102,7 @@ def main(argv=None):
 
 	trdFilename = r'D:\Trenddaten\Month_02.2016\Messkoffer01_TEMP_TF07_Messung_Istwert.hdb'
 	print('\n*** getting Trenddata from raw file (backup) "' + trdFilename + '"')
-	currTrf = trf.Trendfile(trdFilename, collectAll=True)
+	currTrf = trf.RawTrendfile(trdFilename, collectAll=True)
 
 	###################### raw trenddata from file ##################
 	print('Writing raw datapoints into file "' + filename_export_backup_trendfile_str + '"' )

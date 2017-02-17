@@ -99,7 +99,7 @@ class Pdbs(object):
 		for item in trenddata_arr:
 			curr_trenddata = trend.datasource.dbdata.DBData()
 			curr_trenddata.setVariables(item.timestamp, item.value, item.status)
-			if curr_trenddata.getStatusFlagsString() != 'STATUS_END' and curr_trenddata.getStatusFlagsString() != '':
+			if curr_trenddata.getStatusBitsString() != 'STATUS_END' and curr_trenddata.getStatusBitsString() != '':
 				trenddata_list.append(curr_trenddata)
 			else:
 				# found last item, all remaining items are empty
@@ -110,7 +110,7 @@ class Pdbs(object):
 
 			for item in trenddata_list:
 				print('current trenddata: timestamp=' + str(item.getTimestamp()) + '(' + time.strftime("%a, %d %b %Y %H:%M:%S", time.localtime(item.getTimestamp())) + ')' +
-					   ', value='+str(item.getValue()) + ', status=' + item.getStatusFlagsString())
+					   ', value='+str(item.getValue()) + ', status=' + item.getStatusBitsString())
 
 		return trenddata_list
 
