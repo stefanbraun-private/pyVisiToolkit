@@ -175,6 +175,13 @@ class DBData(ctypes.Structure):
 		return ', '.join(self.get_statusbits_set())
 
 
+	# allow using DBData objects in set():
+	# =>we need a hash value over all fields to get same hash for same trenddata element!
+	# example from http://stackoverflow.com/questions/390250/elegant-ways-to-support-equivalence-equality-in-python-classes
+	def __hash__(self):
+		"""Override the default hash behavior (that returns the id or the object)"""
+		return hash(tuple(sorted(self.timestamp, self.value, self.status)))
+
 
 class HighLevelDBData(DBData):
 	"""

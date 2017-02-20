@@ -32,6 +32,7 @@ class Converter(object):
 		self._hdb_filename = hdb_filename
 		self._csv_filename = csv_filename
 		self._DBData_list = []
+		DBData.load_statusbit_class()
 
 	def convert(self):
 		curr_trf = RawTrendfile(self._hdb_filename)
@@ -40,7 +41,6 @@ class Converter(object):
 			header_cells = ["Datum/Zeit", curr_trf.get_dms_Datapoint(), "Status"]
 
 			# if available insert statusbit names instead of their bitnumber
-			DBData.load_statusbit_class()
 			all_statusbits_list = DBData.Statusbit_class().get_statusbits_namelist()
 			if not all_statusbits_list:
 				all_statusbits_list = DBData.Statusbit_class().get_statusbits_unnamedlist()
@@ -49,7 +49,7 @@ class Converter(object):
 			f.write(';'.join(header_cells))
 			f.write('\n')
 
-			for item in curr_trf.get_dbdata_elements():
+			for item in curr_trf.get_dbdata_elements_generator():
 				# help from http://stackoverflow.com/questions/12400256/python-converting-epoch-time-into-the-datetime
 				timestamp_str = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(item.getTimestamp()))
 				value_str = str(item.getValue())
