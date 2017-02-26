@@ -180,7 +180,7 @@ class DBData(ctypes.Structure):
 	# example from http://stackoverflow.com/questions/390250/elegant-ways-to-support-equivalence-equality-in-python-classes
 	def __hash__(self):
 		"""Override the default hash behavior (that returns the id or the object)"""
-		return hash(tuple(sorted(self.timestamp, self.value, self.status)))
+		return hash(tuple([self.timestamp, self.value, self.status]))
 
 
 class HighLevelDBData(DBData):
@@ -190,6 +190,11 @@ class HighLevelDBData(DBData):
 	"""
 	def __init__(self, *kargs, **kwargs):
 		DBData.__init__(*kargs, **kwargs)
+
+	@classmethod
+	def load_statusbit_class(cls):
+		if not DBData.Statusbit_class:
+			DBData.Statusbit_class = get_status_class()
 
 	def get_datetime(self):
 		# hints: https://docs.python.org/2/library/datetime.html#datetime.datetime

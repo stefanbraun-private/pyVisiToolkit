@@ -82,5 +82,8 @@ def main(argv=None):
 		myconverter.convert()
 		print('\tdone.')
 
+	Converter(r'D:\Trend\Month_02.2017\MSR01_Allg_Aussentemp_Istwert.hdb', r'D:\output.csv').convert()
+	Converter(r'D:\Trend\Month_02.2013\MSR01_Allg_Aussentemp_Istwert.hdb', r'D:\output2.csv').convert()
+
 if __name__ == '__main__':
     status = main()
