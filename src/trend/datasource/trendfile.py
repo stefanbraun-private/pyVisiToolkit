@@ -354,7 +354,21 @@ class IndexedTrendfile(RawTrendfile):
 		return search_result
 
 
+	def get_dbdata_lists_generator(self):
+		"""
+		generate lists with DBData-elements grouped by timestamp
+		(ProMoS NT(c) PDBS daemon stores them in sequence, so they should be sorted by timestamp)
+		"""
+		for curr_list in self._indexed_by_index:
+			yield curr_list
 
+
+	def get_dbdata_list_of_lists(self):
+		"""
+		return whole list containing lists with DBData-elements grouped by timestamp
+		(ProMoS NT(c) PDBS daemon stores them in sequence, so they should be sorted by timestamp)
+		"""
+		return self._indexed_by_index
 
 
 
@@ -509,7 +523,7 @@ class MetaTrendfile(object):
 	def get_DBData_Timestamp_Search_Result(self, timestamp_datetime):
 		"""
 		returns an instance of DBData_Timestamp_Search_Result according to given timestamp
-		=>remember: every search must return either an exact match or the values just before and after it!
+		=>remember: every search must return either an exact match or the values just before and after it, except first or last DBData!
 		"""
 
 		search_result_list = []
@@ -546,10 +560,10 @@ class MetaTrendfile(object):
 						# no need to search further...
 						bak_searching_past = False
 						bak_searching_future = False
-					elif search_result.before_list:
+					elif search_result.before_list and not search_result.after_list:
 						bak_searching_past = False
 						bak_searching_future = True
-					elif search_result.after_list:
+					elif search_result.after_list and not search_result.before_list:
 						bak_searching_past = True
 						bak_searching_future = False
 		except Exception as ex:
@@ -596,7 +610,7 @@ class MetaTrendfile(object):
 		# getting closest match from all search results
 		# FIXME: should we care for mismatch between amount of stored DBData items for one timestamp in DAT and Backup?
 
-		my_sr = DBData_Timestamp_Search_Result()
+		combined_sr = DBData_Timestamp_Search_Result()
 
 		# first try: getting exact match
 		if search_result_list:
@@ -607,9 +621,9 @@ class MetaTrendfile(object):
 					dbdata_set.update(sr.exact_list)
 			if dbdata_set:
 				# got exact search results... =>give a list back to caller
-				my_sr.exact_list = list(dbdata_set)
-				assert my_sr.exact_list and not my_sr.before_list and not my_sr.after_list, 'exact match for this timestamp expected!'
-				return my_sr
+				combined_sr.exact_list = list(dbdata_set)
+				assert combined_sr.exact_list and not combined_sr.before_list and not combined_sr.after_list, 'exact match for this timestamp expected!'
+				return combined_sr
 
 		# second try: getting match as close as possible from all available sources
 		if search_result_list:
@@ -622,101 +636,262 @@ class MetaTrendfile(object):
 					curr_timestamp = sr.before_list[0].get_datetime()
 					if curr_timestamp > past_timestamp:
 						# found a closer match
-						my_sr.before_list = sr.before_list
+						combined_sr.before_list = sr.before_list
 						past_timestamp = curr_timestamp
 					elif curr_timestamp == past_timestamp:
 						# found result from other source => inserting DBData elements in case some were missing
-						# (using a set() for insert)
-						dbdata_before_set = set(my_sr.before_list)
-						dbdata_before_set.update(sr.before_list)
-						my_sr.before_list = list(dbdata_before_set)
+						combined_sr.before_list.extend(sr.before_list)
 				# nearest timestamp in the future ("after_list")
 				if sr.after_list:
 					curr_timestamp = sr.after_list[0].get_datetime()
 					if curr_timestamp < future_timestamp:
 						# found a closer match
-						my_sr.after_list = sr.after_list
+						combined_sr.after_list = sr.after_list
 						future_timestamp = curr_timestamp
 					elif curr_timestamp == past_timestamp:
 						# found result from other source => inserting DBData elements in case some were missing
-						# (using a set() for insert)
-						dbdata_after_set = set(my_sr.after_list)
-						dbdata_after_set.update(sr.after_list)
-						my_sr.after_list = list(dbdata_after_set)
-		assert not my_sr.exact_list, 'no exact match for this timestamp expected!'
-		return my_sr
+						combined_sr.after_list.extend(sr.after_list)
+		assert not combined_sr.exact_list, 'no exact match for this timestamp expected!'
+
+		# get unique DBData elements
+		dbdata_before_set = set(combined_sr.before_list)
+		combined_sr.before_list = list(dbdata_before_set)
+
+		dbdata_after_set = set(combined_sr.after_list)
+		combined_sr.after_list = list(dbdata_after_set)
+		return combined_sr
+
+
+	def get_dbdata_lists_generator(self, start_datetime=None, end_datetime=None):
+		"""
+		a generator over all available trenddata for (perhaps) memory efficient retrieving lists with DBData elements,
+		items with same timestamp are grouped
+		(caller can only loop once through generator,
+		read here: http://stackoverflow.com/questions/231767/what-does-the-yield-keyword-do-in-python  )
+		=>optional arguments allows filtering of DBData elements
+		=>using something similar like "mergesort" algorithm: https://en.wikipedia.org/wiki/Merge_sort
+		=>using "deque" objects for efficient popleft: https://docs.python.org/2/library/collections.html#collections.deque
+		=>using uncached trendfile, since we MODIFY the internal DBData-lists
+		"""
+		# FIXME: do a cleaner implementation of this...
+
+		# trenddata in project directory:
+		# =>using one queue
+		dat_deque = collections.deque()
+		try:
+			# trendfile in project directory:
+			filename_fullpath = os.path.join(self.dat_dir, self.trend_filename_str)
+			if os.path.exists(filename_fullpath):
+				dat_trendfile = IndexedTrendfile(filename_fullpath)
+				dat_deque = collections.deque(dat_trendfile.get_dbdata_list_of_lists())
+		except Exception as ex:
+			print('WARNING: MetaTrendfile.get_dbdata_lists_generator(): got exception "' + repr(ex) + '" while getting trend from "' + filename_fullpath + '"')
+
+		# trenddata in backup subdirectories:
+		# =>interpretation as one long queue, combined from different trendfiles
+		# (no subclassing of deque since we don't want to implement all methods of deque()...)
+		class _deque_wrapper(object):
+			def __init__(self, backup_subdirs_dict, backup_dir, trend_filename_str):
+				self._deque_obj = collections.deque()
+				self._backup_subdirs_dict = backup_subdirs_dict
+				self._backup_dir = backup_dir
+				self._trend_filename_str = trend_filename_str
+				self._subdir_iter = iter(sorted(backup_subdirs_dict.keys(), reverse=False))
+				self._load_next_trendfile()
+
+			def _load_next_trendfile(self):
+				# "deque" is empty... trying to append next trendfile
+				try:
+					subdir_str = self._backup_subdirs_dict[self._subdir_iter.next()]
+					filename_fullpath = os.path.join(self._backup_dir, subdir_str, self._trend_filename_str)
+					if os.path.exists(filename_fullpath):
+						# we found a backup file
+						bak_trendfile = IndexedTrendfile(filename_fullpath)
+						self._deque_obj.extend(bak_trendfile.get_dbdata_list_of_lists())
+				except StopIteration:
+					# there are no more backup subdirs to check...
+					pass
+
+			def popleft(self):
+				if not self._deque_obj:
+					# "deque" is empty... trying to append next trendfile
+					self._load_next_trendfile()
+				return self._deque_obj.popleft()
+
+			def __len__(self):
+				# overriding this hook method for allowing getting current size of deque object
+				# (with help from http://stackoverflow.com/questions/15114023/using-len-and-def-len-self-to-build-a-class
+				#  and http://stackoverflow.com/questions/7816363/if-a-vs-if-a-is-not-none
+				# )
+				return len(self._deque_obj)
+
+
+		bak_deque = _deque_wrapper(self.backup_subdirs_dict, self.backup_dir, self.trend_filename_str)
+
+		# checking tail of both deques and return list with unique DBData elements at oldest timestamp
+		# =>do until we returned all available trenddata
+		dat_list = []
+		bak_list = []
+		while True:
+			# get DBData-list from each tail
+			curr_list = []
+			if dat_deque and bak_deque:
+				# both trenddata source available...
+				# =>only get new items when there's nothing left from earlier round
+				if not dat_list:
+					dat_list = dat_deque.popleft()
+				if not bak_list:
+					bak_list = bak_deque.popleft()
+
+				# return older items to caller
+				# if we have same timestamp then we collect all unique DBData element
+				dat_timestamp = dat_list[0].get_datetime()
+				bak_timestamp = bak_list[0].get_datetime()
+				if bak_timestamp < dat_timestamp:
+					curr_list = bak_list
+					bak_list = []
+				elif dat_timestamp < bak_timestamp:
+					curr_list = dat_list
+					dat_list = []
+				else:
+					my_set = set(dat_list + bak_list)
+					curr_list = list(my_set)
+					dat_list = []
+					bak_list = []
+			elif dat_deque:
+				# only trenddata in project directory available...
+				curr_list = dat_deque.popleft()
+			elif bak_deque:
+				# only trenddata in backup directory available...
+				curr_list = bak_deque.popleft()
+			else:
+				# no more trenddata left...
+				curr_list = []
+
+			if curr_list:
+				# check filter
+				ignore = False
+				if start_datetime:
+					if curr_list[0].get_datetime() < start_datetime:
+						ignore = True
+				if end_datetime:
+					if curr_list[0].get_datetime() > end_datetime:
+						ignore = True
+						# nothing to do, stop iteration
+						break
+				if not ignore:
+					yield curr_list
+			else:
+				# nothing to do, stop iteration
+				break
+
 
 
 def main(argv=None):
-	for filename in ['C:\Promos15\proj\Winterthur_MFH_Schaffhauserstrasse\dat\MSR01_Allg_Aussentemp_Istwert.hdb']:
-		#trf = RawTrendfile(filename)
-		trf = IndexedTrendfile(filename)
-		print('RawTrendfile "' + filename + '" contains trenddata of DMS datapoint ' + trf.get_dms_Datapoint())
-		print('number of DBData elements: ' + str(trf.get_nof_dbdata_elements()))
-		print('timestamp of first DBData element: ' + trf.get_first_timestamp().strftime('%Y-%m-%d %H:%M:%S'))
-		print('timestamp of last DBData element: ' + trf.get_last_timestamp().strftime('%Y-%m-%d %H:%M:%S'))
-		print('(timespan is ' + str((trf.get_last_timestamp() - trf.get_first_timestamp()).days) + ' days)')
+	# for filename in ['C:\Promos15\proj\Winterthur_MFH_Schaffhauserstrasse\dat\MSR01_Allg_Aussentemp_Istwert.hdb']:
+	# 	#trf = RawTrendfile(filename)
+	# 	trf = IndexedTrendfile(filename)
+	# 	print('IndexedTrendfile "' + filename + '" contains trenddata of DMS datapoint ' + trf.get_dms_Datapoint())
+	# 	print('number of DBData elements: ' + str(trf.get_nof_dbdata_elements()))
+	# 	print('number of unique timestamps: ' + str(len(trf._indexed_by_timestamp)))
+	# 	print('timestamp of first DBData element: ' + trf.get_first_timestamp().strftime('%Y-%m-%d %H:%M:%S'))
+	# 	print('timestamp of last DBData element: ' + trf.get_last_timestamp().strftime('%Y-%m-%d %H:%M:%S'))
+	# 	print('(timespan is ' + str((trf.get_last_timestamp() - trf.get_first_timestamp()).days) + ' days)')
+	#
+	# 	# getting some values...
+	# 	# hint from http://stackoverflow.com/questions/4741243/how-to-pick-just-one-item-from-a-generator-in-python
+	# 	# =>we need to get another generator object when we want to get the same interation!
+	# 	for x in range(2):
+	# 		print('interpretation of values of some DBData elements: (run number ' + str(x) + ')')
+	# 		my_generator = trf.get_dbdata_elements_generator()
+	# 		for x in range(10):
+	# 			elem = my_generator.next()
+	# 			print('as boolean: ' + str(elem.get_value_as_boolean()) + '\tas int: ' + str(elem.get_value_as_int())+ '\tas float: ' + str(elem.get_value_as_float()))
+	#
+	# 	# getting trenddata by timestamp:
+	# 	timestamps_list = [datetime.datetime(year=2016, month=1, day=6, hour=4, minute=27, second=23),
+	# 	                   datetime.datetime(year=2016, month=1, day=6, hour=4, minute=27, second=24),
+	# 	                   datetime.datetime(year=2016, month=1, day=6, hour=4, minute=27, second=25),
+	# 	                   datetime.datetime(year=2017, month=2, day=6, hour=20, minute=15, second=13),
+	# 	                   datetime.datetime(year=2017, month=2, day=6, hour=20, minute=15, second=14),
+	# 	                   datetime.datetime(year=2017, month=2, day=6, hour=20, minute=15, second=15)]
+	# 	for timestamp in timestamps_list:
+	# 		print('getting DBData elements with timestamp "' + timestamp.strftime('%Y-%m-%d %H:%M:%S') + '"')
+	# 		result = trf.get_DBData_Timestamp_Search_Result(timestamp)
+	# 		print('\t"before_list" contains:')
+	# 		for item in result.before_list:
+	# 			print('\t\t' + item.get_datetime().strftime('%Y-%m-%d %H:%M:%S') + ' / ' + str(item.get_value_as_float()))
+	# 		print('\t"exact_list" contains:')
+	# 		for item in result.exact_list:
+	# 			print('\t\t' + item.get_datetime().strftime('%Y-%m-%d %H:%M:%S') + ' / ' + str(item.get_value_as_float()))
+	# 		print('\t"after_list" contains:')
+	# 		for item in result.after_list:
+	# 			print('\t\t' + item.get_datetime().strftime('%Y-%m-%d %H:%M:%S') + ' / ' + str(item.get_value_as_float()))
 
-		# getting some values...
-		# hint from http://stackoverflow.com/questions/4741243/how-to-pick-just-one-item-from-a-generator-in-python
-		# =>we need to get another generator object when we want to get the same interation!
-		for x in range(2):
-			print('interpretation of values of some DBData elements: (run number ' + str(x) + ')')
-			my_generator = trf.get_dbdata_elements_generator()
-			for x in range(10):
-				elem = my_generator.next()
-				print('as boolean: ' + str(elem.get_value_as_boolean()) + '\tas int: ' + str(elem.get_value_as_int())+ '\tas float: ' + str(elem.get_value_as_float()))
+	# trying backup and projekt directory:
+	print('######################################################################')
+	print('\nTEST: MetaTrendfile() ')
+	mytrf = MetaTrendfile('C:\Promos15\proj\Winterthur_MFH_Schaffhauserstrasse', 'MSR01:Allg:Aussentemp:Istwert')
+	print('get_first_timestamp(): ' + repr(mytrf.get_first_timestamp()))
+	print('get_last_timestamp(): ' + repr(mytrf.get_last_timestamp()))
 
-		# getting trenddata by timestamp:
-		timestamps_list = [datetime.datetime(year=2016, month=1, day=6, hour=4, minute=27, second=23),
-		                   datetime.datetime(year=2016, month=1, day=6, hour=4, minute=27, second=24),
-		                   datetime.datetime(year=2016, month=1, day=6, hour=4, minute=27, second=25),
-		                   datetime.datetime(year=2017, month=2, day=6, hour=20, minute=15, second=13),
-		                   datetime.datetime(year=2017, month=2, day=6, hour=20, minute=15, second=14),
-		                   datetime.datetime(year=2017, month=2, day=6, hour=20, minute=15, second=15)]
-		for timestamp in timestamps_list:
-			print('getting DBData elements with timestamp "' + timestamp.strftime('%Y-%m-%d %H:%M:%S') + '"')
-			result = trf.get_DBData_Timestamp_Search_Result(timestamp)
-			print('\t"before_list" contains:')
-			for item in result.before_list:
-				print('\t\t' + item.get_datetime().strftime('%Y-%m-%d %H:%M:%S') + ' / ' + str(item.get_value_as_float()))
-			print('\t"exact_list" contains:')
-			for item in result.exact_list:
-				print('\t\t' + item.get_datetime().strftime('%Y-%m-%d %H:%M:%S') + ' / ' + str(item.get_value_as_float()))
-			print('\t"after_list" contains:')
-			for item in result.after_list:
-				print('\t\t' + item.get_datetime().strftime('%Y-%m-%d %H:%M:%S') + ' / ' + str(item.get_value_as_float()))
+	# getting trenddata by timestamp:
+	timestamps_list = [datetime.datetime(year=2016, month=1, day=6, hour=4, minute=27, second=23),
+	                   datetime.datetime(year=2016, month=1, day=6, hour=4, minute=27, second=24),
+	                   datetime.datetime(year=2016, month=1, day=6, hour=4, minute=27, second=25),
+	                   datetime.datetime(year=2017, month=2, day=6, hour=20, minute=15, second=13),
+	                   datetime.datetime(year=2017, month=2, day=6, hour=20, minute=15, second=14),
+	                   datetime.datetime(year=2017, month=2, day=6, hour=20, minute=15, second=15),
+	                   datetime.datetime(year=1950, month=1, day=1, hour=0, minute=0, second=0),
+	                   datetime.datetime(year=2999, month=1, day=1, hour=0, minute=0, second=0)
+						]
+	DBData.load_statusbit_class()
+	for timestamp in timestamps_list:
+		print('getting DBData elements with timestamp "' + timestamp.strftime('%Y-%m-%d %H:%M:%S') + '"')
+		result = mytrf.get_DBData_Timestamp_Search_Result(timestamp)
+		print('\t"before_list" contains:')
+		for item in result.before_list:
+			print('\t\t' + item.get_datetime().strftime('%Y-%m-%d %H:%M:%S') + ' / ' + str(item.get_value_as_float()) + ' / ' + item.getStatusBitsString())
+		print('\t"exact_list" contains:')
+		for item in result.exact_list:
+			print('\t\t' + item.get_datetime().strftime('%Y-%m-%d %H:%M:%S') + ' / ' + str(item.get_value_as_float()) + ' / ' + item.getStatusBitsString())
+		print('\t"after_list" contains:')
+		for item in result.after_list:
+			print('\t\t' + item.get_datetime().strftime('%Y-%m-%d %H:%M:%S') + ' / ' + str(item.get_value_as_float()) + ' / ' + item.getStatusBitsString())
 
-		# trying backup and projekt directory:
-		print('######################################################################')
-		print('\nTEST: MetaTrendfile() ')
-		mytrf = MetaTrendfile('C:\Promos15\proj\Winterthur_MFH_Schaffhauserstrasse', 'MSR01:Allg:Aussentemp:Istwert')
-		print('get_first_timestamp(): ' + repr(mytrf.get_first_timestamp()))
-		print('get_last_timestamp(): ' + repr(mytrf.get_last_timestamp()))
+	# test filtering identical timestamps
+	print('\n\ntest filtering identical timestamps')
+	print('######################################')
+	trf_test = IndexedTrendfile(r'C:\Promos15\proj\Winterthur_MFH_Schaffhauserstrasse\dat\MSR01_Allg_Aussentemp_Istwert_LAST_VALUE.hdb')
+	print('DMS-datapoint= ' + trf_test.get_dms_Datapoint())
+	print('\tcontained DBData-elements:')
+	for curr_dbdata in trf_test.get_dbdata_elements_generator():
+		print('\ttimestamp: ' + repr(curr_dbdata.get_datetime()))
+		print('\tvalue: ' + str(curr_dbdata.get_value_as_float()))
+		print('\thash()= ' + str(hash(curr_dbdata)))
+	print('\n\tDBData-elements retrieved as set():')
+	for curr_dbdata in trf_test.get_dbdata_elements_as_set():
+		print('\ttimestamp: ' + repr(curr_dbdata.get_datetime()))
+		print('\tvalue: ' + str(curr_dbdata.get_value_as_float()))
+		print('\thash()= ' + str(hash(curr_dbdata)))
 
-		# getting trenddata by timestamp:
-		timestamps_list = [datetime.datetime(year=2016, month=1, day=6, hour=4, minute=27, second=23),
-		                   datetime.datetime(year=2016, month=1, day=6, hour=4, minute=27, second=24),
-		                   datetime.datetime(year=2016, month=1, day=6, hour=4, minute=27, second=25),
-		                   datetime.datetime(year=2017, month=2, day=6, hour=20, minute=15, second=13),
-		                   datetime.datetime(year=2017, month=2, day=6, hour=20, minute=15, second=14),
-		                   datetime.datetime(year=2017, month=2, day=6, hour=20, minute=15, second=15),
-		                   datetime.datetime(year=1950, month=1, day=1, hour=0, minute=0, second=0),
-		                   datetime.datetime(year=2999, month=1, day=1, hour=0, minute=0, second=0)
-							]
-		DBData.load_statusbit_class()
-		for timestamp in timestamps_list:
-			print('getting DBData elements with timestamp "' + timestamp.strftime('%Y-%m-%d %H:%M:%S') + '"')
-			result = mytrf.get_DBData_Timestamp_Search_Result(timestamp)
-			print('\t"before_list" contains:')
-			for item in result.before_list:
-				print('\t\t' + item.get_datetime().strftime('%Y-%m-%d %H:%M:%S') + ' / ' + str(item.get_value_as_float()) + ' / ' + item.getStatusBitsString())
-			print('\t"exact_list" contains:')
-			for item in result.exact_list:
-				print('\t\t' + item.get_datetime().strftime('%Y-%m-%d %H:%M:%S') + ' / ' + str(item.get_value_as_float()) + ' / ' + item.getStatusBitsString())
-			print('\t"after_list" contains:')
-			for item in result.after_list:
-				print('\t\t' + item.get_datetime().strftime('%Y-%m-%d %H:%M:%S') + ' / ' + str(item.get_value_as_float()) + ' / ' + item.getStatusBitsString())
+	# test number of unique timestamps
+	print('\n\ntest number of unique timestamps')
+	print('#####################################')
+	timespans = [#(None, None),
+	             (datetime.datetime(year=2013, month=1, day=6, hour=0, minute=0, second=0), datetime.datetime(year=2014, month=1, day=6, hour=0, minute=0, second=0)),
+	              (datetime.datetime(year=2013, month=1, day=6, hour=0, minute=0, second=0), datetime.datetime(year=2020, month=1, day=6, hour=0, minute=0, second=0)),
+	             (datetime.datetime(year=2016, month=1, day=6, hour=4, minute=27, second=24), datetime.datetime(year=2017, month=2, day=6, hour=20, minute=15, second=14))]
+	for start, end in timespans:
+		try:
+			print('\tbetween ' + start.strftime('%Y-%m-%d %H:%M:%S') + ' and  ' + end.strftime('%Y-%m-%d %H:%M:%S') + ':')
+		except AttributeError:
+			# this is testcase with (None, None)
+			print('\tin all available trenddata:')
+		x = 0
+		for item in mytrf.get_dbdata_lists_generator(start, end):
+			x = x + 1
+		print('\t\t=>' + str(x) + ' unique timestamps.')
 
 
 	return 0  # success

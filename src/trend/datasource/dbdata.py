@@ -178,9 +178,18 @@ class DBData(ctypes.Structure):
 	# allow using DBData objects in set():
 	# =>we need a hash value over all fields to get same hash for same trenddata element!
 	# example from http://stackoverflow.com/questions/390250/elegant-ways-to-support-equivalence-equality-in-python-classes
+	# ==>we need to implement __hash__() and __eq__()
+	# (according to https://docs.python.org/2/library/sets.html )
 	def __hash__(self):
-		"""Override the default hash behavior (that returns the id or the object)"""
+		"""Override the default hash behavior (that returns the id of the object)"""
 		return hash(tuple([self.timestamp, self.value, self.status]))
+
+	def __eq__(self, other):
+		"""Override the default equality behavior (that uses id of the object)"""
+		return self.timestamp == other.timestamp and self.value == other.value and self.status == other.status
+
+	def __ne__(self, other):
+		return not self.__eq__(other)
 
 
 class HighLevelDBData(DBData):
@@ -208,3 +217,14 @@ class HighLevelDBData(DBData):
 
 	def get_value_as_float(self):
 		return self.value
+
+	# allow using DBData objects in set():
+	# =>using Hash()-implementation of superclass
+	def __hash__(self):
+		return DBData.__hash__(self)
+
+	def __eq__(self, other):
+		return DBData.__eq__(self, other)
+
+	def __ne__(self, other):
+		return not self.__eq__(other)
