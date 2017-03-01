@@ -372,6 +372,18 @@ class IndexedTrendfile(RawTrendfile):
 
 
 
+class TrendfileCache(object):
+	"""
+	Holds trendfile objects in a cache for more efficiency
+	"""
+	_trendfile_cache_dict = {}
+
+	def __init__(self, filename_fullpath):
+		# FIXME =>do implementation.
+		pass
+
+
+
 class MetaTrendfile(object):
 	"""
 	provides all trenddata of a specific DMS datapoint from HDB files in project directory and backup directory
@@ -700,7 +712,7 @@ class MetaTrendfile(object):
 				self._load_next_trendfile()
 
 			def _load_next_trendfile(self):
-				# "deque" is empty... trying to append next trendfile
+				# "deque" is getting empty... trying to append next trendfile
 				try:
 					subdir_str = self._backup_subdirs_dict[self._subdir_iter.next()]
 					filename_fullpath = os.path.join(self._backup_dir, subdir_str, self._trend_filename_str)
@@ -713,7 +725,9 @@ class MetaTrendfile(object):
 					pass
 
 			def popleft(self):
-				if not self._deque_obj:
+				# make shure this class contains enough trenddata, then return next element
+				# (if we let deque ran out of elements then statement "if bak_deque" will fail)
+				if len(self._deque_obj) <= 1:
 					# "deque" is empty... trying to append next trendfile
 					self._load_next_trendfile()
 				return self._deque_obj.popleft()
@@ -879,9 +893,13 @@ def main(argv=None):
 	print('\n\ntest number of unique timestamps')
 	print('#####################################')
 	timespans = [#(None, None),
-	             (datetime.datetime(year=2013, month=1, day=6, hour=0, minute=0, second=0), datetime.datetime(year=2014, month=1, day=6, hour=0, minute=0, second=0)),
-	              (datetime.datetime(year=2013, month=1, day=6, hour=0, minute=0, second=0), datetime.datetime(year=2020, month=1, day=6, hour=0, minute=0, second=0)),
-	             (datetime.datetime(year=2016, month=1, day=6, hour=4, minute=27, second=24), datetime.datetime(year=2017, month=2, day=6, hour=20, minute=15, second=14))]
+	            (datetime.datetime(year=2013, month=1, day=6, hour=0, minute=0, second=0), datetime.datetime(year=2014, month=1, day=6, hour=0, minute=0, second=0)),
+				(datetime.datetime(year=2014, month=1, day=6, hour=0, minute=0, second=0), datetime.datetime(year=2015, month=1, day=6, hour=0, minute=0, second=0)),
+				(datetime.datetime(year=2015, month=1, day=6, hour=0, minute=0, second=0), datetime.datetime(year=2016, month=1, day=6, hour=0, minute=0, second=0)),
+				(datetime.datetime(year=2016, month=1, day=6, hour=0, minute=0, second=0), datetime.datetime(year=2017, month=1, day=6, hour=0, minute=0, second=0)),
+				(datetime.datetime(year=2017, month=1, day=6, hour=0, minute=0, second=0), datetime.datetime(year=2018, month=1, day=6, hour=0, minute=0, second=0)),
+	            (datetime.datetime(year=2013, month=1, day=6, hour=0, minute=0, second=0), datetime.datetime(year=2020, month=1, day=6, hour=0, minute=0, second=0)),
+	            (datetime.datetime(year=2016, month=1, day=6, hour=4, minute=27, second=24), datetime.datetime(year=2017, month=2, day=6, hour=20, minute=15, second=14))]
 	for start, end in timespans:
 		try:
 			print('\tbetween ' + start.strftime('%Y-%m-%d %H:%M:%S') + ' and  ' + end.strftime('%Y-%m-%d %H:%M:%S') + ':')
