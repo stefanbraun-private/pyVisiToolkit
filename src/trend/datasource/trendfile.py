@@ -372,15 +372,80 @@ class IndexedTrendfile(RawTrendfile):
 
 
 
-class TrendfileCache(object):
+class _Cached_Trendfile(object):
+	"""Metadata and reference to a trendfile object, used by Trendfile_Cache_Handler()"""
+	# code is adapted from "PSC_file_selector.py"
+	def __init__(self, fullpath):
+		self._fullpath = fullpath
+		self._whole_file = None
+		self._modification_time = 0
+		self._filesize = 0
+		self._last_readtime = -1
+
+	def _read_metadata(self):
+		stat = os.stat(self._fullpath)
+		self._filesize = stat.st_size
+		self._modification_time = stat.st_mtime
+
+	def get_whole_file(self):
+		self._read_metadata()
+		if self._last_readtime <> self._modification_time:
+			# first reading or file changed
+			self._whole_file = IndexedTrendfile(self._fullpath)
+			self._last_readtime = self._modification_time
+		return self._whole_file
+
+	def get_metadata(self):
+		# examples from http://stackoverflow.com/questions/39359245/from-stat-st-mtime-to-datetime
+		# and http://stackoverflow.com/questions/6591931/getting-file-size-in-python
+		# and https://docs.python.org/2/library/stat.html
+		# and http://stackoverflow.com/questions/455612/limiting-floats-to-two-decimal-points
+		# and http://stackoverflow.com/questions/311627/how-to-print-date-in-a-regular-format-in-python
+		self._read_metadata()
+		size = float("{0:.2f}".format(self._filesize / 1024.0))
+		mod_time = datetime.datetime.fromtimestamp(self._modification_time).strftime("%Y.%m.%d %H:%M:%S")
+		return size, mod_time
+
+
+
+class Trendfile_Cache_Handler(object):
 	"""
 	Holds trendfile objects in a cache for more efficiency
+	=>currently it's one program-wide cache
 	"""
-	_trendfile_cache_dict = {}
 
-	def __init__(self, filename_fullpath):
-		# FIXME =>do implementation.
-		pass
+	# class-variable with cache
+	# =>using OrderedDict() so it's simple to maintain FIFO-cache
+	# https://docs.python.org/2/library/collections.html#collections.OrderedDict
+	_trendfile_cache_dict = collections.OrderedDict()
+	used_cache_size = 0
+
+	# soft-limit of maximum cache size
+	CACHESIZE_KBYTES = 1024 * 100  # 100MBytes
+
+	def get_trendfile_obj(self, filename_fullpath, cached=True):
+		"""optional parameter 'cached': False means working on an isolated Trendfile without interfering other instance holders
+		(it's possible that these DBData-lists could get corrupted, but I'm not 100% shure...)"""
+
+		# maintain FIFO-cache: deleting oldest item if cache is too large
+		curr_size = 0
+		for trf in Trendfile_Cache_Handler._trendfile_cache_dict:
+			size, mod_time = Trendfile_Cache_Handler._trendfile_cache_dict[trf].get_metadata()
+			curr_size = curr_size + size
+		while curr_size > Trendfile_Cache_Handler.CACHESIZE_KBYTES:
+			# remove oldest item
+			dumped_obj = Trendfile_Cache_Handler._trendfile_cache_dict.popitem(last=False)
+
+		# handling request
+		if cached:
+			if not filename_fullpath in Trendfile_Cache_Handler._trendfile_cache_dict:
+				# first time handling of this file...
+				Trendfile_Cache_Handler._trendfile_cache_dict[filename_fullpath] = _Cached_Trendfile(filename_fullpath)
+			return Trendfile_Cache_Handler._trendfile_cache_dict[filename_fullpath].get_whole_file()
+		else:
+			# bypass whole caching
+			return IndexedTrendfile(filename_fullpath)
+
 
 
 
@@ -395,6 +460,7 @@ class MetaTrendfile(object):
 		self.backup_dir = self._get_backup_dir()
 		self.backup_subdirs_dict = self._find_backup_subdirs()   # stores subdir as string (key: tuple (year, month))
 		self.trend_filename_str = self._get_trend_filename()
+		self.trf_cache_handler = Trendfile_Cache_Handler()
 
 	def _get_backup_dir(self):
 		# we have to read INI-file <projectpath>\cfg\PDBSBACK.CFG
@@ -466,7 +532,7 @@ class MetaTrendfile(object):
 		try:
 			# searching in project directory
 			filename_fullpath = os.path.join(self.dat_dir, self.trend_filename_str)
-			dat_trendfile = IndexedTrendfile(filename_fullpath)
+			dat_trendfile = self.trf_cache_handler.get_trendfile_obj(filename_fullpath, cached=True)
 			if os.path.exists(filename_fullpath):
 				# processing this trendfile
 				if position_str == "first":
@@ -495,7 +561,7 @@ class MetaTrendfile(object):
 					# we found a backup, it contains perhaps older trenddata than in project dir...
 					break
 			if filename_fullpath:
-				bak_trendfile = IndexedTrendfile(filename_fullpath)
+				bak_trendfile = self.trf_cache_handler.get_trendfile_obj(filename_fullpath, cached=True)
 				if position_str == "first":
 					# getting oldest DBData
 					found_timestamp = bak_trendfile.get_first_timestamp()
@@ -543,7 +609,7 @@ class MetaTrendfile(object):
 			# searching in project directory
 			filename_fullpath = os.path.join(self.dat_dir, self.trend_filename_str)
 			if os.path.exists(filename_fullpath):
-				dat_trendfile = IndexedTrendfile(filename_fullpath)
+				dat_trendfile = self.trf_cache_handler.get_trendfile_obj(filename_fullpath, cached=True)
 				search_result = dat_trendfile.get_DBData_Timestamp_Search_Result(timestamp_datetime)
 				if search_result:
 					search_result_list.append(search_result)
@@ -563,7 +629,7 @@ class MetaTrendfile(object):
 			curr_subdir = self._get_backup_subdir(timestamp_datetime)
 			filename_fullpath = os.path.join(self.backup_dir, curr_subdir, self.trend_filename_str)
 			if os.path.exists(filename_fullpath):
-				bak_trendfile = IndexedTrendfile(filename_fullpath)
+				bak_trendfile = self.trf_cache_handler.get_trendfile_obj(filename_fullpath, cached=True)
 				search_result = bak_trendfile.get_DBData_Timestamp_Search_Result(timestamp_datetime)
 				if search_result:
 					# got a match... we need to decide how to search further...
@@ -591,7 +657,7 @@ class MetaTrendfile(object):
 						filename_fullpath = os.path.join(self.backup_dir, subdir_str, self.trend_filename_str)
 						if os.path.exists(filename_fullpath):
 							# we found a backup, it should contain DBData before timestamp...
-							bak_trendfile = IndexedTrendfile(filename_fullpath)
+							bak_trendfile = self.trf_cache_handler.get_trendfile_obj(filename_fullpath, cached=True)
 							search_result = bak_trendfile.get_DBData_Timestamp_Search_Result(timestamp_datetime)
 							if search_result:
 								search_result_list.append(search_result)
@@ -611,7 +677,7 @@ class MetaTrendfile(object):
 						filename_fullpath = os.path.join(self.backup_dir, subdir_str, self.trend_filename_str)
 						if os.path.exists(filename_fullpath):
 							# we found a backup, it should contain DBData after timestamp...
-							bak_trendfile = IndexedTrendfile(filename_fullpath)
+							bak_trendfile = self.trf_cache_handler.get_trendfile_obj(filename_fullpath, cached=True)
 							search_result = bak_trendfile.get_DBData_Timestamp_Search_Result(timestamp_datetime)
 							if search_result:
 								search_result_list.append(search_result)
@@ -694,7 +760,8 @@ class MetaTrendfile(object):
 			# trendfile in project directory:
 			filename_fullpath = os.path.join(self.dat_dir, self.trend_filename_str)
 			if os.path.exists(filename_fullpath):
-				dat_trendfile = IndexedTrendfile(filename_fullpath)
+				# disable cache because we alter DBData-list...!!
+				dat_trendfile = self.trf_cache_handler.get_trendfile_obj(filename_fullpath, cached=False)
 				dat_deque = collections.deque(dat_trendfile.get_dbdata_list_of_lists())
 		except Exception as ex:
 			print('WARNING: MetaTrendfile.get_dbdata_lists_generator(): got exception "' + repr(ex) + '" while getting trend from "' + filename_fullpath + '"')
@@ -703,11 +770,12 @@ class MetaTrendfile(object):
 		# =>interpretation as one long queue, combined from different trendfiles
 		# (no subclassing of deque since we don't want to implement all methods of deque()...)
 		class _deque_wrapper(object):
-			def __init__(self, backup_subdirs_dict, backup_dir, trend_filename_str):
+			def __init__(self, backup_subdirs_dict, backup_dir, trend_filename_str, trf_cache_handler):
 				self._deque_obj = collections.deque()
 				self._backup_subdirs_dict = backup_subdirs_dict
 				self._backup_dir = backup_dir
 				self._trend_filename_str = trend_filename_str
+				self.trf_cache_handler = trf_cache_handler
 				self._subdir_iter = iter(sorted(backup_subdirs_dict.keys(), reverse=False))
 				self._load_next_trendfile()
 
@@ -718,7 +786,8 @@ class MetaTrendfile(object):
 					filename_fullpath = os.path.join(self._backup_dir, subdir_str, self._trend_filename_str)
 					if os.path.exists(filename_fullpath):
 						# we found a backup file
-						bak_trendfile = IndexedTrendfile(filename_fullpath)
+						# disable cache because we alter DBData-list...!!
+						bak_trendfile = self.trf_cache_handler.get_trendfile_obj(filename_fullpath, cached=False)
 						self._deque_obj.extend(bak_trendfile.get_dbdata_list_of_lists())
 				except StopIteration:
 					# there are no more backup subdirs to check...
@@ -740,7 +809,7 @@ class MetaTrendfile(object):
 				return len(self._deque_obj)
 
 
-		bak_deque = _deque_wrapper(self.backup_subdirs_dict, self.backup_dir, self.trend_filename_str)
+		bak_deque = _deque_wrapper(self.backup_subdirs_dict, self.backup_dir, self.trend_filename_str, self.trf_cache_handler)
 
 		# checking tail of both deques and return list with unique DBData elements at oldest timestamp
 		# =>do until we returned all available trenddata
@@ -876,7 +945,10 @@ def main(argv=None):
 	# test filtering identical timestamps
 	print('\n\ntest filtering identical timestamps')
 	print('######################################')
-	trf_test = IndexedTrendfile(r'C:\Promos15\proj\Winterthur_MFH_Schaffhauserstrasse\dat\MSR01_Allg_Aussentemp_Istwert_LAST_VALUE.hdb')
+	filename_fullpath = r'C:\Promos15\proj\Winterthur_MFH_Schaffhauserstrasse\dat\MSR01_Allg_Aussentemp_Istwert_LAST_VALUE.hdb'
+	#trf_test = IndexedTrendfile()
+	# TESTING cache:
+	trf_test = Trendfile_Cache_Handler().get_trendfile_obj(filename_fullpath, cached=True)
 	print('DMS-datapoint= ' + trf_test.get_dms_Datapoint())
 	print('\tcontained DBData-elements:')
 	for curr_dbdata in trf_test.get_dbdata_elements_generator():
