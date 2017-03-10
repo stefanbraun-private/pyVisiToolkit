@@ -114,6 +114,57 @@ def get_status_class():
 	return Status
 
 
+class Statusbit_Meaning(object):
+	"""provides caller a convenient way to available statusbits"""
+	# hold reference to an instance of statusbit class for better performance
+	# (user has to restart when he manipulates DBDATA_STATUSBITS_YAML file during runtime)
+	statusbit_instance = None
+
+	# performance tuning: holding a cache for <statusvalue> ==> <set of activated statusbits>
+	statusvalue_meaning_dict = {}
+
+	def __init__(self):
+		# load Statusbit class and create instance when needed
+		if not Statusbit_Meaning.statusbit_instance:
+			curr_class = get_status_class()
+			Statusbit_Meaning.statusbit_instance = curr_class()
+
+	def get_all_statusbits_set(self):
+		# return a set with all available statusbit names
+		return set(self.get_all_statusbits_list())
+
+	def get_all_statusbits_list(self):
+		# return a list with all available statusbit names
+		global statusbits_namelist
+		global statusbits_unnamedlist
+		return statusbits_namelist + statusbits_unnamedlist
+
+	def get_curr_statusbits_set(self, curr_status):
+		# generate a set containing only active statusbits from given status value
+		# (if available insert named and unnamed statusbits)
+		# =>idea from http://stackoverflow.com/questions/3789372/python-can-we-convert-a-ctypes-structure-to-a-dictionary
+
+		# first look in cached statusvalue-meaning
+		if curr_status in Statusbit_Meaning.statusvalue_meaning_dict:
+			myset = Statusbit_Meaning.statusvalue_meaning_dict[curr_status]
+		else:
+			# first time lookup of this statusvalue... creating this set
+			# because of statical behaviour of ctypes: using class attribut
+			Statusbit_Meaning.statusbit_instance.asLong = curr_status
+
+			myset = set()
+			for bit_name in self.get_all_statusbits_list():
+				if getattr(Statusbit_Meaning.statusbit_instance, bit_name):
+					myset.add(bit_name)
+
+			Statusbit_Meaning.statusvalue_meaning_dict[curr_status] = myset
+
+		# FIXME: will caller manipulate this set?!? if yes, then we should return a new set-instance: "return set(myset)"
+		return myset
+
+
+
+
 class DBData(ctypes.Structure):
 	# Trenddata struct: [time (=>32bit unsigned integer), value (=>32bit IEEE float), status (=>32bit bitmap, interpret as unsigned integer)], every element is 32bit
 	# https://docs.python.org/2/library/struct.html#format-characters
@@ -125,85 +176,67 @@ class DBData(ctypes.Structure):
 		("value", ctypes.c_float),
 		("status", ctypes.c_uint)]
 
-	# hold reference to statusbit class for better performance
-	# FIXME: first time call to DBData.Statusbit_class().get_statusbits_namelist() crashes when no DBData constructor created "Statusbit_class"...
-	# FIXME: =>how can we do this in a cleaner way with better incapsulation?
-	Statusbit_class = None
-
-	@classmethod
-	def load_statusbit_class(cls):
-		if not cls.Statusbit_class:
-			cls.Statusbit_class = get_status_class()
-
-	def __init__(self, *kargs, **kwargs):
-		ctypes.Structure.__init__(self, *kargs, **kwargs)
-		DBData.load_statusbit_class()
-
-	def __str__(self):
-		# a simple string prasentation
-		return 'timestamp=' + str(self.timestamp) + '\tvalue=' + str(self.value) + '\tstatus=' + str(
-			self.status) + ' (' + self.getStatusBitsString() + ')'
-
-	def getValue(self, offset=0, corrFactor=1.0):
-		return corrFactor * (self.value + float(offset))
-
-	def getTimestamp(self):
-		return self.timestamp
-
-	def getStatus(self):
-		return self.status
-
-	def get_statusbits_set(self):
-		curr_bits = DBData.Statusbit_class()
-		curr_bits.asLong = self.status
-
-		# generate a set containing only active statusbits
-		# (if available insert named and unnamed statusbits)
-		# =>idea from http://stackoverflow.com/questions/3789372/python-can-we-convert-a-ctypes-structure-to-a-dictionary
-		myset = set()
-
-		allbits_list = []
-		allbits_list.extend(curr_bits.get_statusbits_namelist())
-		allbits_list.extend(curr_bits.get_statusbits_unnamedlist())
-		for bit_name in allbits_list:
-			if getattr(curr_bits, bit_name):
-				myset.add(bit_name)
-
-		return myset
-
-	def getStatusBitsString(self):
-		return ', '.join(self.get_statusbits_set())
+	def __init__(self):
+		ctypes.Structure.__init__(self)
 
 
-	# allow using DBData objects in set():
-	# =>we need a hash value over all fields to get same hash for same trenddata element!
-	# example from http://stackoverflow.com/questions/390250/elegant-ways-to-support-equivalence-equality-in-python-classes
-	# ==>we need to implement __hash__() and __eq__()
-	# (according to https://docs.python.org/2/library/sets.html )
-	def __hash__(self):
-		"""Override the default hash behavior (that returns the id of the object)"""
-		return hash(tuple([self.timestamp, self.value, self.status]))
+class DBData2(ctypes.Structure):
+	# Trenddata struct in ProMoS v2.0 (based on comparison between *.hdb and *.hdbx files)
+	# ATTENTION: DBData struct in ProMoS v1.x has a length of 12 bytes, in ProMoS v2.x it has length of 24 bytes
+	# -timestamp (=>32bit unsigned integer),
+	# -unknown field 4 bytes,
+	# -status (=>32bit bitmap, interpret as unsigned integer),
+	# -unknown field 4 bytes,
+	# -value (=>64bit IEEE float)
+	# https://docs.python.org/2/library/struct.html#format-characters
+	STRUCT_FORMAT = 'IIIId'
 
-	def __eq__(self, other):
-		"""Override the default equality behavior (that uses id of the object)"""
-		return self.timestamp == other.timestamp and self.value == other.value and self.status == other.status
+	# based on http://stackoverflow.com/questions/1444159/how-to-read-a-structure-containing-an-array-using-pythons-ctypes-and-readinto
+	_fields_ = [
+		("timestamp", ctypes.c_uint),
+		("unknown_bytes1", ctypes.c_char * 4),
+		("status", ctypes.c_uint),
+		("unknown_bytes2", ctypes.c_char * 4),
+		("value", ctypes.c_double)]
 
-	def __ne__(self, other):
-		return not self.__eq__(other)
+	def __init__(self):
+		ctypes.Structure.__init__(self)
 
 
-class HighLevelDBData(DBData):
+
+
+class HighLevelDBData(DBData, DBData2):
 	"""
 	Interpret the raw data in DBData as datetime-object and value in a datatype
 	https://docs.python.org/2/library/datetime.html
 	"""
-	def __init__(self, *kargs, **kwargs):
-		DBData.__init__(*kargs, **kwargs)
+	def __init__(self, version=1):
+		# initialisation of superclass
+		if version == 1:
+			DBData.__init__(self)
+		else:
+			DBData2.__init__(self)
+
+	# create DBData instance of right version
+	# (with some help from http://code.activestate.com/recipes/303059-overriding-__new__-for-attribute-initialization/  )
+	def __new__(cls, version=1):
+		if version == 1:
+			obj = DBData.__new__(DBData)
+			print('HighLevelDBData.__new__() was executed')
+		else:
+			obj = DBData2.__new__(DBData2)
+		return obj
+
+	# for better performance: hold a reference to Statusbit_Meaning in a class attribut
+	_statusbit_meaning = None
 
 	@classmethod
-	def load_statusbit_class(cls):
-		if not DBData.Statusbit_class:
-			DBData.Statusbit_class = get_status_class()
+	def _load_statusbit_meaning(cls):
+		# get instance of Statusbit_Meaning for all later usages
+		# =>if we already have one then we ignore this request
+		# (this way user have to restart whole application when he makes deep changes in "DBDATA_STATUSBITS_YAML")
+		if not cls._statusbit_meaning:
+			cls._statusbit_meaning = Statusbit_Meaning()
 
 	def get_datetime(self):
 		# hints: https://docs.python.org/2/library/datetime.html#datetime.datetime
@@ -218,13 +251,51 @@ class HighLevelDBData(DBData):
 	def get_value_as_float(self):
 		return self.value
 
+
+	def __str__(self):
+		# a simple string prasentation
+		return 'timestamp=' + str(self.timestamp) + '\tvalue=' + str(self.value) + '\tstatus=' + str(
+			self.status) + ' (' + self.getStatusBitsString() + ')'
+
+
+	def getValue(self, offset=0, corrFactor=1.0):
+		return corrFactor * (self.value + float(offset))
+
+
+	def getTimestamp(self):
+		return self.timestamp
+
+
+	def getStatus(self):
+		return self.status
+
+
+	def get_statusbits_set(self):
+		# return current active statusbits in "status" field
+		# =>if class attribut is not loaded then we need to load it first...
+		if not HighLevelDBData._statusbit_meaning:
+			HighLevelDBData._load_statusbit_meaning()
+		return HighLevelDBData._statusbit_meaning.get_curr_statusbits_set(self.status)
+
+
+	def getStatusBitsString(self):
+		return ', '.join(self.get_statusbits_set())
+
+
 	# allow using DBData objects in set():
-	# =>using Hash()-implementation of superclass
+	# =>we need a hash value over all fields to get same hash for same trenddata element!
+	# example from http://stackoverflow.com/questions/390250/elegant-ways-to-support-equivalence-equality-in-python-classes
+	# ==>we need to implement __hash__() and __eq__()
+	# (according to https://docs.python.org/2/library/sets.html )
 	def __hash__(self):
-		return DBData.__hash__(self)
+		"""Override the default hash behavior (that returns the id of the object)"""
+		return hash(tuple([self.timestamp, self.value, self.status]))
+
 
 	def __eq__(self, other):
-		return DBData.__eq__(self, other)
+		"""Override the default equality behavior (that uses id of the object)"""
+		return self.timestamp == other.timestamp and self.value == other.value and self.status == other.status
+
 
 	def __ne__(self, other):
 		return not self.__eq__(other)

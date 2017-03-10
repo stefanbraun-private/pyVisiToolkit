@@ -869,6 +869,19 @@ class MetaTrendfile(object):
 				break
 
 
+	def get_search_result_generator(self, start_datetime=None, end_datetime=None):
+		"""
+		a generator creating DBData_Timestamp_Search_Result objects with all available trenddata as exact-list
+		(reusing all DBData lists from get_dbdata_lists_generator()
+		"""
+		for curr_list in self.get_dbdata_lists_generator(start_datetime, end_datetime):
+			sr = DBData_Timestamp_Search_Result()
+			# returning this list of DBData elements as exact search hit
+			sr.exact_list.extend(curr_list)
+			yield sr
+
+
+
 
 def main(argv=None):
 	# for filename in ['C:\Promos15\proj\Winterthur_MFH_Schaffhauserstrasse\dat\MSR01_Allg_Aussentemp_Istwert.hdb']:
@@ -928,7 +941,6 @@ def main(argv=None):
 	                   datetime.datetime(year=1950, month=1, day=1, hour=0, minute=0, second=0),
 	                   datetime.datetime(year=2999, month=1, day=1, hour=0, minute=0, second=0)
 						]
-	DBData.load_statusbit_class()
 	for timestamp in timestamps_list:
 		print('getting DBData elements with timestamp "' + timestamp.strftime('%Y-%m-%d %H:%M:%S') + '"')
 		result = mytrf.get_DBData_Timestamp_Search_Result(timestamp)
