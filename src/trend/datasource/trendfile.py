@@ -20,6 +20,7 @@ import os
 import datetime
 import calendar
 from trend.datasource.dbdata import HighLevelDBData as DBData
+from trend.datasource.dbdata import HighLevelDBData as DBData2
 import configparser
 import string
 import re
@@ -63,7 +64,17 @@ def get_trendfile_structure_obj(file_fullpath):
 	TRENDDATA_OFFSET = 1024     # based ob reverse engineering *.hdb file format
 
 	filesize = os.path.getsize(file_fullpath)
-	nof_dbdata_elems = (filesize - TRENDDATA_OFFSET) / ctypes.sizeof(DBData)
+
+	# DBData could be ProMoS NT(c) version 1.x or version 2 =>choosing right version
+	# with help from http://stackoverflow.com/questions/541390/extracting-extension-from-filename-in-python
+	file_ext = os.path.splitext(file_fullpath)[1]
+	if file_ext.upper() == u'HDB':
+		# using ProMoS NT(c) version 1.x
+		curr_DBData_class = DBData
+	else:
+		# using ProMoS NT(c) version 2.x
+		curr_DBData_class = DBData2
+	nof_dbdata_elems = (filesize - TRENDDATA_OFFSET) / ctypes.sizeof(curr_DBData_class)
 
 	class Trendfile_structure(ctypes.LittleEndianStructure):
 		"""
@@ -74,7 +85,7 @@ def get_trendfile_structure_obj(file_fullpath):
 		_fields_ = [
 			("dmsDatapoint", ctypes.c_char * DMSDP_NOF_BYTES),                          # DMS datapoint name
 			("UNKNOWN_BYTES", ctypes.c_char * (TRENDDATA_OFFSET - DMSDP_NOF_BYTES)),    # perhaps unused
-			("dbdata", DBData * nof_dbdata_elems)                                       # array of DBData elements
+			("dbdata", curr_DBData_class * nof_dbdata_elems)                            # array of DBData elements
 
 		]
 

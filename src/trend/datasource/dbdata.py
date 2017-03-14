@@ -205,27 +205,104 @@ class DBData2(ctypes.Structure):
 
 
 
-class HighLevelDBData(DBData, DBData2):
+class HighLevelDBData(DBData):
 	"""
 	Interpret the raw data in DBData as datetime-object and value in a datatype
 	https://docs.python.org/2/library/datetime.html
 	"""
-	def __init__(self, version=1):
+	def __init__(self):
 		# initialisation of superclass
-		if version == 1:
-			DBData.__init__(self)
-		else:
-			DBData2.__init__(self)
+		DBData.__init__(self)
 
-	# create DBData instance of right version
-	# (with some help from http://code.activestate.com/recipes/303059-overriding-__new__-for-attribute-initialization/  )
-	def __new__(cls, version=1):
-		if version == 1:
-			obj = DBData.__new__(DBData)
-			print('HighLevelDBData.__new__() was executed')
-		else:
-			obj = DBData2.__new__(DBData2)
-		return obj
+	# for better performance: hold a reference to Statusbit_Meaning in a class attribut
+	_statusbit_meaning = None
+
+	@classmethod
+	def _load_statusbit_meaning(cls):
+		# get instance of Statusbit_Meaning for all later usages
+		# =>if we already have one then we ignore this request
+		# (this way user have to restart whole application when he makes deep changes in "DBDATA_STATUSBITS_YAML")
+		if not cls._statusbit_meaning:
+			cls._statusbit_meaning = Statusbit_Meaning()
+
+	def get_datetime(self):
+		# hints: https://docs.python.org/2/library/datetime.html#datetime.datetime
+		return datetime.datetime.fromtimestamp(self.timestamp)
+
+	def get_value_as_boolean(self):
+		return self.value > 0.0
+
+	def get_value_as_int(self):
+		return int(self.value)
+
+	def get_value_as_float(self):
+		return self.value
+
+
+	def __str__(self):
+		# a simple string prasentation
+		return 'timestamp=' + str(self.timestamp) + '\tvalue=' + str(self.value) + '\tstatus=' + str(
+			self.status) + ' (' + self.getStatusBitsString() + ')'
+
+
+	def getValue(self, offset=0, corrFactor=1.0):
+		return corrFactor * (self.value + float(offset))
+
+
+	def getTimestamp(self):
+		return self.timestamp
+
+
+	def getStatus(self):
+		return self.status
+
+
+	def get_statusbits_set(self):
+		# return current active statusbits in "status" field
+		# =>if class attribut is not loaded then we need to load it first...
+		if not HighLevelDBData._statusbit_meaning:
+			HighLevelDBData._load_statusbit_meaning()
+		return HighLevelDBData._statusbit_meaning.get_curr_statusbits_set(self.status)
+
+
+	def getStatusBitsString(self):
+		return ', '.join(self.get_statusbits_set())
+
+
+	# allow using DBData objects in set():
+	# =>we need a hash value over all fields to get same hash for same trenddata element!
+	# example from http://stackoverflow.com/questions/390250/elegant-ways-to-support-equivalence-equality-in-python-classes
+	# ==>we need to implement __hash__() and __eq__()
+	# (according to https://docs.python.org/2/library/sets.html )
+	def __hash__(self):
+		"""Override the default hash behavior (that returns the id of the object)"""
+		return hash(tuple([self.timestamp, self.value, self.status]))
+
+
+	def __eq__(self, other):
+		"""Override the default equality behavior (that uses id of the object)"""
+		return self.timestamp == other.timestamp and self.value == other.value and self.status == other.status
+
+
+	def __ne__(self, other):
+		return not self.__eq__(other)
+
+
+
+
+class HighLevelDBData2(DBData2):
+	"""
+	Interpret the raw data in DBData2 as datetime-object and value in a datatype
+	https://docs.python.org/2/library/datetime.html
+
+	=>FIXME: mostly same code as in "class HighLevelDBData"... How can we refactor the HighLevel methods?
+	(problems: ctypes structure fields are class attributes, and when using these structures in an array
+	no constructor and no __new__() is getting called, I see no possibility to create right DBData instances
+	on the fly...)
+	"""
+	def __init__(self):
+		# initialisation of superclass
+		DBData2.__init__(self)
 
 	# for better performance: hold a reference to Statusbit_Meaning in a class attribut
 	_statusbit_meaning = None
