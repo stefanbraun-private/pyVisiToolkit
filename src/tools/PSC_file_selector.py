@@ -254,10 +254,48 @@ class FileSelectorGUI(Tkinter.Tk):
 
 		string_regex_label = Tkinter.Label(self, text=u'Regex-pattern for strings (re.search):')
 
+
+		# hold a list of last search values, they get updated when user does a doubleclick
+		# =>build a separate frame
+		last_pattern_frame = Tkinter.Frame(master=self, bd=1, relief='sunken')
+
+		self.last_file_regex = Tkinter.StringVar()
+		self.last_file_regex.set(FileSelectorGUI.RE_PATTERN_UNDERSCORE)
+		self.last_file_regex_entrybox = Tkinter.Entry(last_pattern_frame, textvariable=self.last_file_regex, state='disabled')
+		self.last_file_regex_entrybox.config(width=80)
+
+		last_file_regex_label = Tkinter.Label(last_pattern_frame, text=u'Saved Regex-pattern for files:')
+
+		self.last_string_regex = Tkinter.StringVar()
+		self.last_string_regex_entrybox = Tkinter.Entry(last_pattern_frame, textvariable=self.last_string_regex, state='disabled')
+		self.last_string_regex_entrybox.insert(0, '')
+		self.last_string_regex_entrybox.config(width=80)
+
+		last_string_regex_label = Tkinter.Label(last_pattern_frame, text=u'Saved Regex-pattern for strings:')
+
+		self.last_file_fullpath = Tkinter.StringVar()
+		self.last_file_fullpath_entrybox = Tkinter.Entry(last_pattern_frame, textvariable=self.last_file_fullpath, state='disabled')
+		self.last_file_fullpath_entrybox.insert(0, '')
+		self.last_file_fullpath_entrybox.config(width=80)
+
+		last_file_fullpath_label = Tkinter.Label(last_pattern_frame, text=u'Last opened PSC file:')
+
+		self.last_file_regex_entrybox.grid(row=1, column=1, sticky='e', padx=4, pady=4)
+		last_file_regex_label.grid(row=1, column=0, sticky='w', padx=4, pady=4)
+
+		self.last_string_regex_entrybox.grid(row=2, column=1, sticky='e', padx=4, pady=4)
+		last_string_regex_label.grid(row=2, column=0, sticky='w', padx=4, pady=4)
+
+		self.last_file_fullpath_entrybox.grid(row=3, column=1, sticky='e', padx=4, pady=4)
+		last_file_fullpath_label.grid(row=3, column=0, sticky='w', padx=4, pady=4)
+
+
+		# build a frame containing all buttons in a row
 		button_frame = Tkinter.Frame(master=self, bd=1, relief='sunken')
 		btn_underscore = Tkinter.Button(button_frame, text=u'Set Pattern "UNDERSCORE"', command=self._cb_btn_underscore)
 		btn_all_psc = Tkinter.Button(button_frame, text=u'Set Pattern "ALL_PSC"', command=self._cb_btn_all_psc)
 		btn_vlo_collection = Tkinter.Button(button_frame, text=u'Set Pattern "VLO_COLLECTION"', command=self._cb_btn_vlo_collection)
+		btn_last_search = Tkinter.Button(button_frame, text=u'Redo Last Search', command=self._cb_btn_last_search)
 		btn_Quit = Tkinter.Button(button_frame, text='Quit', command=self.quit)
 
 		self._draw_tree()
@@ -282,12 +320,16 @@ class FileSelectorGUI(Tkinter.Tk):
 		self.string_regex_entrybox.grid(row=4, column=0, sticky='e', padx=4 , pady=4)
 		string_regex_label.grid(row=4, column=0, sticky='w', padx=4 , pady=4)
 
+		# insert "last search patterns" frame into main grid
+		last_pattern_frame.grid(row=5, column=0, columnspan=2, padx=4 , pady=4)
+
 		btn_underscore.pack(side='left')
 		btn_all_psc.pack(side='left')
 		btn_vlo_collection.pack(side='left')
+		btn_last_search.pack(side='left')
 		# FIXME: Button "btn_Quit" doesn't gets placed on the right side...Why?!?
 		btn_Quit.pack(side='right', padx=30, anchor='e')
-		button_frame.grid(row=5, column=0, sticky='w', padx=4 , pady=4)
+		button_frame.grid(row=6, column=0, sticky='w', padx=4 , pady=4)
 
 		self.grid_columnconfigure(0, weight=1)
 		self.grid_rowconfigure(0, weight=1)
@@ -371,6 +413,11 @@ class FileSelectorGUI(Tkinter.Tk):
 		if fullpath.split('.')[-1].upper() == u'PSC':
 			# write filename to the right DMS datapoint
 			self._curr_DMS.pyDMS_WriteSTREx(self._curr_image_dp, fullpath)
+
+			# save current search patterns
+			self.last_file_regex.set(self.file_regex_pattern.get())
+			self.last_string_regex.set(self.string_regex_pattern.get())
+			self.last_file_fullpath.set(fullpath)
 
 	def singleclick_handler(self, event):
 		"""
@@ -516,6 +563,10 @@ class FileSelectorGUI(Tkinter.Tk):
 		if self.string_regex_pattern.get() != '':
 			self.string_regex_pattern.set('')
 
+	def _cb_btn_last_search(self, *args):
+		# redo last search: restore all saved search patterns
+		self.file_regex_pattern.set(self.last_file_regex.get())
+		self.string_regex_pattern.set(self.last_string_regex.get())
 
 
 def main(argv=None):
