@@ -34,7 +34,7 @@ import codecs
 import subprocess
 import misc.clipboard
 
-ROOTWINDOW_TITLE = u'PSC file selector v0.2.1'
+ROOTWINDOW_TITLE = u'PSC file selector v0.2.2'
 USAGE_HINT_TEXT = u'Usage hints: double-click = open in GE // right-click = context-menu // header-click = sorting columns'
 
 
@@ -256,7 +256,8 @@ class FileSelectorGUI(Tkinter.Tk):
 
 
 		# hold a list of last search values, they get updated when user does a doubleclick
-		# =>build a separate frame
+		#########################################
+		# =>build a separate frame for "last search"
 		last_pattern_frame = Tkinter.Frame(master=self, bd=1, relief='sunken')
 
 		self.last_file_regex = Tkinter.StringVar()
@@ -280,6 +281,8 @@ class FileSelectorGUI(Tkinter.Tk):
 
 		last_file_fullpath_label = Tkinter.Label(last_pattern_frame, text=u'Last opened PSC file:')
 
+		btn_last_search = Tkinter.Button(last_pattern_frame, text=u'Redo last search', command=self._cb_btn_last_search)
+
 		self.last_file_regex_entrybox.grid(row=1, column=1, sticky='e', padx=4, pady=4)
 		last_file_regex_label.grid(row=1, column=0, sticky='w', padx=4, pady=4)
 
@@ -289,13 +292,57 @@ class FileSelectorGUI(Tkinter.Tk):
 		self.last_file_fullpath_entrybox.grid(row=3, column=1, sticky='e', padx=4, pady=4)
 		last_file_fullpath_label.grid(row=3, column=0, sticky='w', padx=4, pady=4)
 
+		btn_last_search.grid(row=0, column=2, rowspan=3, sticky=Tkinter.NSEW, padx=4, pady=4)
+		#########################################
+		# =>build a separate frame for "second last search"
+		last2_pattern_frame = Tkinter.Frame(master=self, bd=1, relief='sunken')
+
+		self.last2_file_regex = Tkinter.StringVar()
+		self.last2_file_regex.set(FileSelectorGUI.RE_PATTERN_UNDERSCORE)
+		self.last2_file_regex_entrybox = Tkinter.Entry(last2_pattern_frame, textvariable=self.last2_file_regex,
+		                                               state='disabled')
+		self.last2_file_regex_entrybox.config(width=80)
+
+		last2_file_regex_label = Tkinter.Label(last2_pattern_frame, text=u'Saved Regex-pattern for files:')
+
+		self.last2_string_regex = Tkinter.StringVar()
+		self.last2_string_regex_entrybox = Tkinter.Entry(last2_pattern_frame, textvariable=self.last2_string_regex,
+		                                                 state='disabled')
+		self.last2_string_regex_entrybox.insert(0, '')
+		self.last2_string_regex_entrybox.config(width=80)
+
+		last2_string_regex_label = Tkinter.Label(last2_pattern_frame, text=u'Saved Regex-pattern for strings:')
+
+		self.last2_file_fullpath = Tkinter.StringVar()
+		self.last2_file_fullpath_entrybox = Tkinter.Entry(last2_pattern_frame, textvariable=self.last2_file_fullpath,
+		                                                  state='disabled')
+		self.last2_file_fullpath_entrybox.insert(0, '')
+		self.last2_file_fullpath_entrybox.config(width=80)
+
+		last2_file_fullpath_label = Tkinter.Label(last2_pattern_frame, text=u'Second last opened PSC file:')
+
+		btn_last2_search = Tkinter.Button(last2_pattern_frame, text=u'Redo second last search',
+		                                  command=self._cb_btn_last2_search)
+
+		self.last2_file_regex_entrybox.grid(row=1, column=1, sticky='e', padx=4, pady=4)
+		last2_file_regex_label.grid(row=1, column=0, sticky='w', padx=4, pady=4)
+
+		self.last2_string_regex_entrybox.grid(row=2, column=1, sticky='e', padx=4, pady=4)
+		last2_string_regex_label.grid(row=2, column=0, sticky='w', padx=4, pady=4)
+
+		self.last2_file_fullpath_entrybox.grid(row=3, column=1, sticky='e', padx=4, pady=4)
+		last2_file_fullpath_label.grid(row=3, column=0, sticky='w', padx=4, pady=4)
+
+		btn_last2_search.grid(row=0, column=2, rowspan=3, sticky=Tkinter.NSEW, padx=4, pady=4)
+		#########################################
+
+
 
 		# build a frame containing all buttons in a row
 		button_frame = Tkinter.Frame(master=self, bd=1, relief='sunken')
 		btn_underscore = Tkinter.Button(button_frame, text=u'Set Pattern "UNDERSCORE"', command=self._cb_btn_underscore)
 		btn_all_psc = Tkinter.Button(button_frame, text=u'Set Pattern "ALL_PSC"', command=self._cb_btn_all_psc)
 		btn_vlo_collection = Tkinter.Button(button_frame, text=u'Set Pattern "VLO_COLLECTION"', command=self._cb_btn_vlo_collection)
-		btn_last_search = Tkinter.Button(button_frame, text=u'Redo Last Search', command=self._cb_btn_last_search)
 		btn_Quit = Tkinter.Button(button_frame, text='Quit', command=self.quit)
 
 		self._draw_tree()
@@ -320,16 +367,16 @@ class FileSelectorGUI(Tkinter.Tk):
 		self.string_regex_entrybox.grid(row=4, column=0, sticky='e', padx=4 , pady=4)
 		string_regex_label.grid(row=4, column=0, sticky='w', padx=4 , pady=4)
 
-		# insert "last search patterns" frame into main grid
-		last_pattern_frame.grid(row=5, column=0, columnspan=2, padx=4 , pady=4)
+		# insert "last search patterns" frames into main grid
+		last_pattern_frame.grid(row=5, column=0, columnspan=2, sticky=Tkinter.NSEW, padx=4 , pady=4)
+		last2_pattern_frame.grid(row=6, column=0, columnspan=2, sticky=Tkinter.NSEW, padx=4, pady=4)
 
 		btn_underscore.pack(side='left')
 		btn_all_psc.pack(side='left')
 		btn_vlo_collection.pack(side='left')
-		btn_last_search.pack(side='left')
 		# FIXME: Button "btn_Quit" doesn't gets placed on the right side...Why?!?
 		btn_Quit.pack(side='right', padx=30, anchor='e')
-		button_frame.grid(row=6, column=0, sticky='w', padx=4 , pady=4)
+		button_frame.grid(row=7, column=0, sticky='w', padx=4 , pady=4)
 
 		self.grid_columnconfigure(0, weight=1)
 		self.grid_rowconfigure(0, weight=1)
@@ -414,9 +461,19 @@ class FileSelectorGUI(Tkinter.Tk):
 			# write filename to the right DMS datapoint
 			self._curr_DMS.pyDMS_WriteSTREx(self._curr_image_dp, fullpath)
 
-			# save current search patterns
-			self.last_file_regex.set(self.file_regex_pattern.get())
-			self.last_string_regex.set(self.string_regex_pattern.get())
+			# when search patterns were updated,
+			# then update "last search" and "second last search"
+			if self.file_regex_pattern.get() != self.last_file_regex.get() or self.string_regex_pattern.get() != self.last_string_regex.get():
+				# save last search patterns
+				self.last2_file_regex.set(self.last_file_regex.get())
+				self.last2_string_regex.set(self.last_string_regex.get())
+				self.last2_file_fullpath.set(self.last_file_fullpath.get())
+
+				# save current search patterns
+				self.last_file_regex.set(self.file_regex_pattern.get())
+				self.last_string_regex.set(self.string_regex_pattern.get())
+
+			# always update opened filename
 			self.last_file_fullpath.set(fullpath)
 
 	def singleclick_handler(self, event):
@@ -567,6 +624,11 @@ class FileSelectorGUI(Tkinter.Tk):
 		# redo last search: restore all saved search patterns
 		self.file_regex_pattern.set(self.last_file_regex.get())
 		self.string_regex_pattern.set(self.last_string_regex.get())
+
+	def _cb_btn_last2_search(self, *args):
+		# redo second last search: restore all saved search patterns
+		self.file_regex_pattern.set(self.last2_file_regex.get())
+		self.string_regex_pattern.set(self.last2_string_regex.get())
 
 
 def main(argv=None):
