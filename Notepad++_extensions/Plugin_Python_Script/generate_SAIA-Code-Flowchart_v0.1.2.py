@@ -6,7 +6,12 @@ Uses Notepad++ and Graphviz for generating flowchart of SAIA Instruction List fi
 -generated Dot-file contains node definitions in HTML (for some syntax-highlighting in generated graphic)
 -needs installation of Graphviz (adjust absolute path in PATH_GRAPHVIZ_BINARY to the EXE file)
 
+FIXME: Labels and symbols are case-insensitive... We should implement a workaround for differently written labels
+ from Sasm52.chm helpfile: "Symbols can be up to 80 characters long, and are not case-sensitive unless they contain accented characters. MotorOn is the same as MOTORON, but FÜHRER is not the same as führer."
+
+
 Changelog:
+v0.1.2 / 20.03.2017	Bugfix Regex-pattern "RE_LABELS"
 v0.1.1 / 11.11.2016	Bugfix Regex-pattern "RE_JUMPS"
 v0.1.0 / 29.3.2016	public release
 
@@ -45,9 +50,10 @@ class srcFile(object):
 	#                   JR     L W20
 	RE_JUMPS = r'^\s*(([A-Z]|[a-z])([A-Z]|[a-z]|[0-9]|_)+:)*\s*(JR|JPD|JPI)\s+(H|L|P|N|Z|E)*\s*(([A-Z]|[a-z])([A-Z]|[a-z]|[0-9]|_)+)'
 	
-	# example label:
+	# example label (second one is also valid!):
 	# NO_BP_EIN:         COPY   RMBP_Verz
-	RE_LABELS = r'^\s*(([A-Z]|[a-z])([A-Z]|[a-z]|[0-9]|_)+):\s'
+	# Cmp14_noHand:
+	RE_LABELS = r'^\s*(([A-Z]|[a-z])([A-Z]|[a-z]|[0-9]|_)+):([\s$])'
 	
 	def __init__(self):
 		self._labels = {}

@@ -17,7 +17,7 @@ You should have received a copy of the GNU General Public License along with thi
 """
 
 
-from trend.datasource.dbdata import DBData
+from trend.datasource.dbdata import Statusbit_Meaning
 from trend.datasource.trendfile import RawTrendfile
 import struct
 import time
@@ -32,7 +32,6 @@ class Converter(object):
 		self._hdb_filename = hdb_filename
 		self._csv_filename = csv_filename
 		self._DBData_list = []
-		DBData.load_statusbit_class()
 
 	def convert(self):
 		curr_trf = RawTrendfile(self._hdb_filename)
@@ -41,9 +40,7 @@ class Converter(object):
 			header_cells = ["Datum/Zeit", curr_trf.get_dms_Datapoint(), "Status"]
 
 			# if available insert statusbit names instead of their bitnumber
-			all_statusbits_list = DBData.Statusbit_class().get_statusbits_namelist()
-			if not all_statusbits_list:
-				all_statusbits_list = DBData.Statusbit_class().get_statusbits_unnamedlist()
+			all_statusbits_list = Statusbit_Meaning().get_all_statusbits_list()
 			for bit in all_statusbits_list:
 				header_cells.append(bit)
 			f.write(';'.join(header_cells))
@@ -52,6 +49,9 @@ class Converter(object):
 			for item in curr_trf.get_dbdata_elements_generator():
 				# help from http://stackoverflow.com/questions/12400256/python-converting-epoch-time-into-the-datetime
 				timestamp_str = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(item.getTimestamp()))
+
+				## test with DST (daylight saving time)
+				#timestamp_str = time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime(item.getTimestamp()))
 				value_str = str(item.getValue())
 				status_str = str(item.getStatus())
 				curr_row = [timestamp_str, value_str, status_str]
@@ -82,9 +82,11 @@ def main(argv=None):
 		myconverter.convert()
 		print('\tdone.')
 
-	Converter(r'D:\Trend\Month_02.2017\MSR01_Allg_Aussentemp_Istwert.hdb', r'D:\output.csv').convert()
-	Converter(r'D:\Trend\Month_02.2013\MSR01_Allg_Aussentemp_Istwert.hdb', r'D:\output2.csv').convert()
-	Converter(r'C:\Promos15\proj\Winterthur_MFH_Schaffhauserstrasse\dat\MSR01_Allg_Aussentemp_Istwert.hdb', r'D:\output3.csv').convert()
+	#Converter(r'D:\Trend\Month_02.2017\MSR01_Allg_Aussentemp_Istwert.hdb', r'D:\output.csv').convert()
+	#Converter(r'D:\Trend\Month_02.2013\MSR01_Allg_Aussentemp_Istwert.hdb', r'D:\output2.csv').convert()
+	#Converter(r'C:\Promos15\proj\Winterthur_MFH_Schaffhauserstrasse\dat\MSR01_Allg_Aussentemp_Istwert.hdb', r'D:\output3.csv').convert()
+	Converter(r'D:\Trend\Month_10.2016\MSR01_A_Allg_Aussentemp_Istwert.hdb', r'D:\Sommer2Winterzeit.csv').convert()
+	Converter(r'D:\Trend\Month_03.2017\MSR01_A_Allg_Aussentemp_Istwert.hdb', r'D:\Winter2Sommerzeit.csv').convert()
 
 if __name__ == '__main__':
     status = main()
