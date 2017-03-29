@@ -23,6 +23,7 @@ import time
 import os
 import yaml
 import datetime
+import misc.timezone as timezone
 
 DBDATA_STATUSBITS_YAML = r'c:\PyVisiToolkit_DBData_Statusbits.yml'
 statusbits_namelist = []
@@ -214,6 +215,9 @@ class HighLevelDBData(DBData):
 		# initialisation of superclass
 		DBData.__init__(self)
 
+	# timezone awareness (FIXME: currently fixed to 'Europe/Zurich')
+	_tz = timezone.Timezone().get_tz()
+
 	# for better performance: hold a reference to Statusbit_Meaning in a class attribut
 	_statusbit_meaning = None
 
@@ -227,7 +231,7 @@ class HighLevelDBData(DBData):
 
 	def get_datetime(self):
 		# hints: https://docs.python.org/2/library/datetime.html#datetime.datetime
-		return datetime.datetime.fromtimestamp(self.timestamp)
+		return datetime.datetime.fromtimestamp(self.timestamp, HighLevelDBData._tz)
 
 	def get_value_as_boolean(self):
 		return self.value > 0.0
@@ -304,6 +308,9 @@ class HighLevelDBData2(DBData2):
 		# initialisation of superclass
 		DBData2.__init__(self)
 
+	# timezone awareness (FIXME: currently fixed to 'Europe/Zurich')
+	_tz = timezone.Timezone().get_tz()
+
 	# for better performance: hold a reference to Statusbit_Meaning in a class attribut
 	_statusbit_meaning = None
 
@@ -317,7 +324,7 @@ class HighLevelDBData2(DBData2):
 
 	def get_datetime(self):
 		# hints: https://docs.python.org/2/library/datetime.html#datetime.datetime
-		return datetime.datetime.fromtimestamp(self.timestamp)
+		return datetime.datetime.fromtimestamp(self.timestamp, HighLevelDBData2._tz)
 
 	def get_value_as_boolean(self):
 		return self.value > 0.0

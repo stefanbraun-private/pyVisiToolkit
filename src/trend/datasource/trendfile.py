@@ -25,6 +25,7 @@ import configparser
 import string
 import re
 import collections
+import misc.timezone as timezone
 
 DEBUGGING = True
 
@@ -473,6 +474,10 @@ class MetaTrendfile(object):
 		self.trend_filename_str = self._get_trend_filename()
 		self.trf_cache_handler = Trendfile_Cache_Handler()
 
+	# timezone awareness (FIXME: currently fixed to 'Europe/Zurich')
+	_tz = timezone.Timezone().get_tz()
+
+
 	def _get_backup_dir(self):
 		# we have to read INI-file <projectpath>\cfg\PDBSBACK.CFG
 		# and get this attribut:
@@ -662,7 +667,7 @@ class MetaTrendfile(object):
 			if bak_searching_past:
 				# walking backwards through available directories
 				for year, month in sorted(self.backup_subdirs_dict.keys(), reverse=True):
-					backupdir_timestamp = datetime.datetime(year=int(year), month=int(month), day=1)
+					backupdir_timestamp = datetime.datetime(year=int(year), month=int(month), day=1, tzinfo=MetaTrendfile._tz)
 					if backupdir_timestamp < timestamp_datetime:
 						subdir_str = self.backup_subdirs_dict[year, month]
 						filename_fullpath = os.path.join(self.backup_dir, subdir_str, self.trend_filename_str)
@@ -682,7 +687,7 @@ class MetaTrendfile(object):
 				for year, month in sorted(self.backup_subdirs_dict.keys(), reverse=False):
 					# with help from http://stackoverflow.com/questions/42950/get-last-day-of-the-month-in-python
 					last_day_of_month = calendar.monthrange(int(year), int(month))[1]
-					backupdir_timestamp = datetime.datetime(year=int(year), month=int(month), day=last_day_of_month)
+					backupdir_timestamp = datetime.datetime(year=int(year), month=int(month), day=last_day_of_month, tzinfo=MetaTrendfile._tz)
 					if backupdir_timestamp > timestamp_datetime:
 						subdir_str = self.backup_subdirs_dict[year, month]
 						filename_fullpath = os.path.join(self.backup_dir, subdir_str, self.trend_filename_str)
@@ -717,8 +722,8 @@ class MetaTrendfile(object):
 		# second try: getting match as close as possible from all available sources
 		if search_result_list:
 			# collecting closest timestamp-lists
-			past_timestamp = datetime.datetime(year=1900, month=1, day=1)
-			future_timestamp = datetime.datetime(year=2100, month=1, day=1)
+			past_timestamp = datetime.datetime(year=1900, month=1, day=1, tzinfo=MetaTrendfile._tz)
+			future_timestamp = datetime.datetime(year=2100, month=1, day=1, tzinfo=MetaTrendfile._tz)
 			for sr in search_result_list:
 				# nearest timestamp in the past ("before_list")
 				if sr.before_list:
@@ -943,14 +948,14 @@ def main(argv=None):
 	print('get_last_timestamp(): ' + repr(mytrf.get_last_timestamp()))
 
 	# getting trenddata by timestamp:
-	timestamps_list = [datetime.datetime(year=2016, month=1, day=6, hour=4, minute=27, second=23),
-	                   datetime.datetime(year=2016, month=1, day=6, hour=4, minute=27, second=24),
-	                   datetime.datetime(year=2016, month=1, day=6, hour=4, minute=27, second=25),
-	                   datetime.datetime(year=2017, month=2, day=6, hour=20, minute=15, second=13),
-	                   datetime.datetime(year=2017, month=2, day=6, hour=20, minute=15, second=14),
-	                   datetime.datetime(year=2017, month=2, day=6, hour=20, minute=15, second=15),
-	                   datetime.datetime(year=1950, month=1, day=1, hour=0, minute=0, second=0),
-	                   datetime.datetime(year=2999, month=1, day=1, hour=0, minute=0, second=0)
+	timestamps_list = [datetime.datetime(year=2016, month=1, day=6, hour=4, minute=27, second=23, tzinfo=MetaTrendfile._tz),
+	                   datetime.datetime(year=2016, month=1, day=6, hour=4, minute=27, second=24, tzinfo=MetaTrendfile._tz),
+	                   datetime.datetime(year=2016, month=1, day=6, hour=4, minute=27, second=25, tzinfo=MetaTrendfile._tz),
+	                   datetime.datetime(year=2017, month=2, day=6, hour=20, minute=15, second=13, tzinfo=MetaTrendfile._tz),
+	                   datetime.datetime(year=2017, month=2, day=6, hour=20, minute=15, second=14, tzinfo=MetaTrendfile._tz),
+	                   datetime.datetime(year=2017, month=2, day=6, hour=20, minute=15, second=15, tzinfo=MetaTrendfile._tz),
+	                   datetime.datetime(year=1950, month=1, day=1, hour=0, minute=0, second=0, tzinfo=MetaTrendfile._tz),
+	                   datetime.datetime(year=2999, month=1, day=1, hour=0, minute=0, second=0, tzinfo=MetaTrendfile._tz)
 						]
 	for timestamp in timestamps_list:
 		print('getting DBData elements with timestamp "' + timestamp.strftime('%Y-%m-%d %H:%M:%S') + '"')
@@ -988,13 +993,13 @@ def main(argv=None):
 	print('\n\ntest number of unique timestamps')
 	print('#####################################')
 	timespans = [#(None, None),
-	            (datetime.datetime(year=2013, month=1, day=6, hour=0, minute=0, second=0), datetime.datetime(year=2014, month=1, day=6, hour=0, minute=0, second=0)),
-				(datetime.datetime(year=2014, month=1, day=6, hour=0, minute=0, second=0), datetime.datetime(year=2015, month=1, day=6, hour=0, minute=0, second=0)),
-				(datetime.datetime(year=2015, month=1, day=6, hour=0, minute=0, second=0), datetime.datetime(year=2016, month=1, day=6, hour=0, minute=0, second=0)),
-				(datetime.datetime(year=2016, month=1, day=6, hour=0, minute=0, second=0), datetime.datetime(year=2017, month=1, day=6, hour=0, minute=0, second=0)),
-				(datetime.datetime(year=2017, month=1, day=6, hour=0, minute=0, second=0), datetime.datetime(year=2018, month=1, day=6, hour=0, minute=0, second=0)),
-	            (datetime.datetime(year=2013, month=1, day=6, hour=0, minute=0, second=0), datetime.datetime(year=2020, month=1, day=6, hour=0, minute=0, second=0)),
-	            (datetime.datetime(year=2016, month=1, day=6, hour=4, minute=27, second=24), datetime.datetime(year=2017, month=2, day=6, hour=20, minute=15, second=14))]
+	            (datetime.datetime(year=2013, month=1, day=6, hour=0, minute=0, second=0, tzinfo=MetaTrendfile._tz), datetime.datetime(year=2014, month=1, day=6, hour=0, minute=0, second=0, tzinfo=MetaTrendfile._tz)),
+				(datetime.datetime(year=2014, month=1, day=6, hour=0, minute=0, second=0, tzinfo=MetaTrendfile._tz), datetime.datetime(year=2015, month=1, day=6, hour=0, minute=0, second=0, tzinfo=MetaTrendfile._tz)),
+				(datetime.datetime(year=2015, month=1, day=6, hour=0, minute=0, second=0, tzinfo=MetaTrendfile._tz), datetime.datetime(year=2016, month=1, day=6, hour=0, minute=0, second=0, tzinfo=MetaTrendfile._tz)),
+				(datetime.datetime(year=2016, month=1, day=6, hour=0, minute=0, second=0, tzinfo=MetaTrendfile._tz), datetime.datetime(year=2017, month=1, day=6, hour=0, minute=0, second=0, tzinfo=MetaTrendfile._tz)),
+				(datetime.datetime(year=2017, month=1, day=6, hour=0, minute=0, second=0, tzinfo=MetaTrendfile._tz), datetime.datetime(year=2018, month=1, day=6, hour=0, minute=0, second=0, tzinfo=MetaTrendfile._tz)),
+	            (datetime.datetime(year=2013, month=1, day=6, hour=0, minute=0, second=0, tzinfo=MetaTrendfile._tz), datetime.datetime(year=2020, month=1, day=6, hour=0, minute=0, second=0, tzinfo=MetaTrendfile._tz)),
+	            (datetime.datetime(year=2016, month=1, day=6, hour=4, minute=27, second=24, tzinfo=MetaTrendfile._tz), datetime.datetime(year=2017, month=2, day=6, hour=20, minute=15, second=14, tzinfo=MetaTrendfile._tz))]
 	for start, end in timespans:
 		try:
 			print('\tbetween ' + start.strftime('%Y-%m-%d %H:%M:%S') + ' and  ' + end.strftime('%Y-%m-%d %H:%M:%S') + ':')
