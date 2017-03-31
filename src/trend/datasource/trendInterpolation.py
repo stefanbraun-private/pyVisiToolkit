@@ -19,9 +19,10 @@ DEBUGGING = True
 
 from trend.datasource.trendfile import MetaTrendfile
 import datetime
+import misc.timezone as timezone
 
 class Interpolation(object):
-	INTERPOLATION_ANALOGUE = 1
+	INTERPOLATION_ANALOG = 1
 	INTERPOLATION_DIGITAL = 2
 
 	def __init__(self, projectpath_str, dms_dp_str, interpolation_type_int):
@@ -61,7 +62,7 @@ class Interpolation(object):
 
 					timedelta_total = (tstamp_after - tstamp_before).seconds
 					timedelta_between = (timestamp_datetime - tstamp_before).seconds
-					assert timedelta_total > 0, 'trenddata seems corrupted, we expect a rising timestamp with one second resolution!'
+					assert timedelta_total > 0, 'trenddata seems corrupted, we expect rising timestamps with one second resolution!'
 					val_delta = timedelta_between * (val_after - val_before) / timedelta_total
 					return val_before + val_delta
 
@@ -98,6 +99,8 @@ class Interpolation(object):
 
 	def get_value_as_float(self, timestamp_datetime):
 		if self._has_trenddata(timestamp_datetime):
+			if DEBUGGING:
+				print('\tInterpolation.get_value_as_float() was called with argument "' + str(timestamp_datetime) + '"')
 			return self._get_value(timestamp_datetime)
 		else:
 			return None
@@ -109,17 +112,17 @@ class Interpolation(object):
 		is_time_delta_positiv = start_datetime < stop_datetime
 		is_time_delta_negativ = start_datetime > stop_datetime
 		assert interval_timedelta != datetime.timedelta(), 'interval_timedelta must contain a value lesser or greater than zero!'
-		assert is_direction_forward and is_time_delta_positiv, 'forward mode: stop_datetime is assumed after start_datetime!'
-		assert not(is_direction_forward) and is_time_delta_negativ, 'reversed mode: stop_datetime is assumed before start_datetime!'
+		assert is_direction_forward and is_time_delta_positiv or not(is_direction_forward) and is_time_delta_negativ, \
+			'forward mode: start_datetime < stop_datetime // reversed mode: start_datetime > stop_datetime!'
 		curr_time = start_datetime
 		if is_direction_forward:
 			while curr_time <= stop_datetime:
-				curr_time = curr_time + interval_timedelta
 				yield self.get_value_as_float(curr_time)
+				curr_time = curr_time + interval_timedelta
 		else:
 			while curr_time >= stop_datetime:
-				curr_time = curr_time + interval_timedelta
 				yield self.get_value_as_float(curr_time)
+				curr_time = curr_time + interval_timedelta
 
 
 	def interpolated_booleans_generator(self, start_datetime, stop_datetime, interval_timedelta):
@@ -139,6 +142,26 @@ class Interpolation(object):
 
 
 def main(argv=None):
+	curr_tz = timezone.Timezone().get_tz()
+	my_analog_trend = Interpolation(projectpath_str='C:\Promos15\proj\Foo',
+	                        dms_dp_str='NS_MSR01a:H01:AussenTemp:Istwert',
+	                        interpolation_type_int=Interpolation.INTERPOLATION_ANALOG)
+	for val in my_analog_trend.interpolated_floats_generator(start_datetime=datetime.datetime(year=2017, month=2, day=1, hour=0, tzinfo=curr_tz),
+	                                                 stop_datetime=datetime.datetime(year=2017, month=2, day=2, hour=0, tzinfo=curr_tz),
+	                                                 interval_timedelta=datetime.timedelta(hours=6)):
+		print('val = ' + str(val) + ', type is ' + str(type(val)))
+
+	my_digital_trend = Interpolation(projectpath_str='C:\Promos15\proj\Foo',
+	                                dms_dp_str='NS_MSR01a:H01:VerdUwp:RM_Ein',
+	                                interpolation_type_int=Interpolation.INTERPOLATION_DIGITAL)
+	for val in my_digital_trend.interpolated_booleans_generator(
+			start_datetime=datetime.datetime(year=2017, month=2, day=1, hour=0, tzinfo=curr_tz),
+			stop_datetime=datetime.datetime(year=2017, month=2, day=1, hour=4, tzinfo=curr_tz),
+			interval_timedelta=datetime.timedelta(hours=1)):
+		print('val = ' + str(val) + ', type is ' + str(type(val)))
+
+
+
 	return 0  # success
 
 

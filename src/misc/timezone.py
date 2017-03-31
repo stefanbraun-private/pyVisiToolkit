@@ -67,7 +67,12 @@ You should have received a copy of the GNU General Public License along with thi
 import pytz
 
 class Timezone(object):
-	def __init__(self, tz_database_str='Europe/Zurich'):
+
+	# strange.... when using 'Europe/Zurich', then datetime.datetime objects can have
+	# wrong timezone offset: tzinfo=<DstTzInfo 'Europe/Zurich' BMT+0:30:00 STD> ?!?!?
+	#def __init__(self, tz_database_str='Europe/Zurich'):
+	# =>with "Middle European Time" it works as expected... tzinfo=<DstTzInfo 'MET' MET+1:00:00 STD>
+	def __init__(self, tz_database_str='MET'):
 		self._tz =  pytz.timezone(tz_database_str)
 
 	def get_tz(self):
