@@ -15,7 +15,7 @@ This program is distributed in the hope that it will be useful, but WITHOUT ANY 
 You should have received a copy of the GNU General Public License along with this program. If not, see <http://www.gnu.org/licenses/>.
 """
 
-DEBUGGING = True
+DEBUGGING = False
 
 from trend.datasource.trendfile import MetaTrendfile
 import datetime
@@ -128,17 +128,35 @@ class Interpolation(object):
 	def interpolated_booleans_generator(self, start_datetime, stop_datetime, interval_timedelta):
 		# generator for sampled values with given interval =>values are booleans
 		for value in self._interpolated_values_generator(start_datetime, stop_datetime, interval_timedelta):
-			yield value >= 0.5
+			if value:
+				yield value >= 0.5
+			else:
+				yield None
 
 	def interpolated_integers_generator(self, start_datetime, stop_datetime, interval_timedelta):
 		# generator for sampled values with given interval =>values are integers
 		for value in self._interpolated_values_generator(start_datetime, stop_datetime, interval_timedelta):
-			yield int(value)
+			if value:
+				yield int(value)
+			else:
+				yield None
 
 	def interpolated_floats_generator(self, start_datetime, stop_datetime, interval_timedelta):
 		# generator for sampled values with given interval =>values are floats
 		for value in self._interpolated_values_generator(start_datetime, stop_datetime, interval_timedelta):
-			yield value
+			if value:
+				yield value
+			else:
+				yield None
+
+
+	def get_dbdata_timestamps_generator(self, start_datetime=None, stop_datetime=None):
+		"""
+		using generator in trendfile for all available trenddata timestamps
+		"""
+		for tstamp_obj in self._meta_trf.get_dbdata_timestamps_generator(start_datetime, stop_datetime):
+			yield tstamp_obj
+
 
 
 def main(argv=None):

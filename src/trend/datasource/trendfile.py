@@ -26,6 +26,8 @@ import string
 import re
 import collections
 import misc.timezone as timezone
+import itertools
+from operator import itemgetter
 
 DEBUGGING = True
 
@@ -382,6 +384,13 @@ class IndexedTrendfile(RawTrendfile):
 		"""
 		return self._indexed_by_index
 
+	def get_dbdata_timestamps_generator(self):
+		"""
+		return all contained timestamps
+		(they should be in ascending order, ProMoS NT(c) PDBS daemon stores them in sequence in HDB files,
+		and we put then into an OrderedDict)
+		"""
+		return self._indexed_by_timestamp.iterkeys()
 
 
 class _Cached_Trendfile(object):
@@ -885,17 +894,113 @@ class MetaTrendfile(object):
 				break
 
 
-	def get_search_result_generator(self, start_datetime=None, end_datetime=None):
+	def get_search_result_generator(self, start_datetime=None, stop_datetime=None):
 		"""
 		a generator creating DBData_Timestamp_Search_Result objects with all available trenddata as exact-list
 		(reusing all DBData lists from get_dbdata_lists_generator()
 		"""
-		for curr_list in self.get_dbdata_lists_generator(start_datetime, end_datetime):
+		for curr_list in self.get_dbdata_lists_generator(start_datetime, stop_datetime):
 			sr = DBData_Timestamp_Search_Result()
 			# returning this list of DBData elements as exact search hit
 			sr.exact_list.extend(curr_list)
 			yield sr
 
+
+	def get_dbdata_timestamps_generator(self, start_datetime=None, stop_datetime=None):
+		"""
+		a generator creating objects with timestamps and time difference to last timestamp of all available trenddata
+		(contains some copied code from "self.get_DBData_Timestamp_Search_Result(self, timestamp_datetime()" )
+		"""
+
+		# getting generators of all timestamp sources,
+		# then always yield the oldest timestamp of all active timestamp sources
+
+
+		# helper class for combining results
+		class Tstamp(object):
+			"""
+			tstamp: timestamp as datetime.datetime object
+			diff: difference to last timestamp in seconds
+			"""
+			old_tstamp_dt = None
+
+			def __init__(self, curr_tstamp_dt):
+				self.tstamp_dt = curr_tstamp_dt
+				if not Tstamp.old_tstamp_dt:
+					# first run =>first timestamp is always okay and should have difference = 0
+					self.diff = 0.0
+				else:
+					self.diff = (curr_tstamp_dt - Tstamp.old_tstamp_dt).total_seconds()
+				Tstamp.old_tstamp_dt = curr_tstamp_dt
+				# value is used in class "Expression"
+				self.value = None
+
+
+		if not start_datetime:
+			start_datetime = datetime.datetime.fromtimestamp(0, tz=MetaTrendfile._tz)
+		if not stop_datetime:
+			stop_datetime = datetime.datetime(year=3000, month=1, day=1).replace(tzinfo=MetaTrendfile._tz)
+
+		prj_iter = iter([])
+		# trenddata in project directory
+		filename_fullpath = os.path.join(self.dat_dir, self.trend_filename_str)
+		if os.path.exists(filename_fullpath):
+			dat_trendfile = self.trf_cache_handler.get_trendfile_obj(filename_fullpath, cached=True)
+			usable = True
+			if dat_trendfile.get_last_timestamp() < start_datetime:
+				# trenddata is too old
+				usable = False
+			if dat_trendfile.get_first_timestamp() > stop_datetime:
+				# trenddata is too new
+				usable = False
+			if usable:
+				prj_iter = dat_trendfile.get_dbdata_timestamps_generator()
+
+		# lazily generating timestamp iterators from backup
+		# (idea from http://stackoverflow.com/questions/15004772/what-is-the-difference-between-chain-and-chain-from-iterable-in-itertools )
+		def generate_backup_iterators():
+			# walking forward through available directories
+			for year, month in sorted(self.backup_subdirs_dict.keys(), reverse=False):
+				if int(year) >= start_datetime.year and int(month) >= start_datetime.month and \
+					int(year) <= stop_datetime.year and int(month) <= stop_datetime.month:
+					# current backup directory should contain trenddata in requested timerange
+					subdir_str = self.backup_subdirs_dict[year, month]
+					filename_fullpath = os.path.join(self.backup_dir, subdir_str, self.trend_filename_str)
+					if os.path.exists(filename_fullpath):
+						# we found a backup, it should contain trenddata...
+						bak_trendfile = self.trf_cache_handler.get_trendfile_obj(filename_fullpath, cached=True)
+						yield bak_trendfile.get_dbdata_timestamps_generator()
+
+		# combine this generator of generators with trenddata from project
+		bak_iter = itertools.chain.from_iterable(generate_backup_iterators())
+
+		tstamp_generator_list = []
+		for source in [prj_iter, bak_iter]:
+			try:
+				# this list always contains head element from iterator, and iterator itself
+				new_source = [source.next(), source]
+				tstamp_generator_list.append(new_source)
+			except StopIteration:
+				pass
+
+		# request items from both generators, always returning smaller value
+		while tstamp_generator_list:
+			# consuming timestamps, returning always oldest one, updating first element
+			# sorting list of tuples: http://stackoverflow.com/questions/10695139/sort-a-list-of-tuples-by-2nd-item-integer-value
+			# =>getting source list with oldest timestamp
+			tstamp_generator_list = sorted(tstamp_generator_list, key=itemgetter(0))
+			oldest_source_list = tstamp_generator_list[0]
+			curr_tstamp, curr_iter = oldest_source_list[0], oldest_source_list[1]
+
+			if curr_tstamp >= start_datetime and curr_tstamp <= stop_datetime:
+				yield Tstamp(curr_tstamp)
+
+			try:
+				# update head-element of current timestamp source
+				oldest_source_list[0] = curr_iter.next()
+			except StopIteration:
+				# iterator is empty... =>removing this timestamp-source
+				tstamp_generator_list = tstamp_generator_list[1:]
 
 
 
