@@ -21,16 +21,26 @@ from trend.datasource.trendfile import MetaTrendfile
 import datetime
 import misc.timezone as timezone
 
+
+# helper class for caching slow "get_DBData_Timestamp_Search_Result()"
+class SRCache(object):
+	def __init__(self):
+		self.tstamp_datetime = None
+		self.search_result = None
+
+
 class Interpolation(object):
 	INTERPOLATION_ANALOG = 1
 	INTERPOLATION_DIGITAL = 2
 
+
 	def __init__(self, projectpath_str, dms_dp_str, interpolation_type_int):
 		self._interpolation_type_int = interpolation_type_int
 		self._meta_trf = MetaTrendfile(projectpath_str, dms_dp_str)
+		self._srcache = SRCache()
 
 	def _get_value(self, timestamp_datetime):
-		curr_sr = self._meta_trf.get_DBData_Timestamp_Search_Result(timestamp_datetime)
+		curr_sr = self._DBData_Timestamp_Search_Result_wrapper(timestamp_datetime)
 
 		# analyzing of search result
 		if curr_sr.exact_list:
@@ -77,6 +87,30 @@ class Interpolation(object):
 			return sum(values_list) / len(values_list)
 		else:
 			return dbdata_list[0].get_value_as_float()
+
+
+	def _DBData_Timestamp_Search_Result_wrapper(self, timestamp_datetime):
+		if self._srcache.tstamp_datetime == timestamp_datetime:
+			if self._srcache.search_result:
+				# using cached search result
+				return self._srcache.search_result
+		else:
+			# doing fresh search, update cache
+			self._srcache.search_result = self._meta_trf.get_DBData_Timestamp_Search_Result(timestamp_datetime)
+			self._srcache.tstamp_datetime = timestamp_datetime
+			return self._srcache.search_result
+
+
+	def get_age(self, timestamp_datetime):
+		# difference between given timestamp and last available trenddata timestamp in seconds
+		# =>this "age" shows holes in trenddata
+		curr_sr = self._DBData_Timestamp_Search_Result_wrapper(timestamp_datetime)
+		if curr_sr.exact_list:
+			# exact search hit =>difference is 0
+			return 0
+		else:
+			tstamp_before = curr_sr.before_list[0].get_datetime()
+			return (timestamp_datetime - tstamp_before).seconds
 
 
 	def _has_trenddata(self, timestamp_datetime):

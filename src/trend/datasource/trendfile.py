@@ -916,7 +916,7 @@ class MetaTrendfile(object):
 		# then always yield the oldest timestamp of all active timestamp sources
 
 
-		# helper class for combining results
+		# helper class for combining timestamp and time difference
 		class Tstamp(object):
 			"""
 			tstamp: timestamp as datetime.datetime object
@@ -927,13 +927,11 @@ class MetaTrendfile(object):
 			def __init__(self, curr_tstamp_dt):
 				self.tstamp_dt = curr_tstamp_dt
 				if not Tstamp.old_tstamp_dt:
-					# first run =>first timestamp is always okay and should have difference = 0
-					self.diff = 0.0
+					# first run =>first timestamp is always okay and should have age = 0
+					self.age = 0.0
 				else:
-					self.diff = (curr_tstamp_dt - Tstamp.old_tstamp_dt).total_seconds()
+					self.age = (curr_tstamp_dt - Tstamp.old_tstamp_dt).total_seconds()
 				Tstamp.old_tstamp_dt = curr_tstamp_dt
-				# value is used in class "Expression"
-				self.value = None
 
 
 		if not start_datetime:

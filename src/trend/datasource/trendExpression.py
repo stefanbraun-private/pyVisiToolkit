@@ -48,6 +48,11 @@ class Variable(object):
 			# default: returning float
 			return self._interpolation.get_value_as_float(timestamp_datetime)
 
+	def get_age(self, timestamp_datetime):
+		# difference between given timestamp and last available trenddata timestamp in seconds
+		# =>this "freshness" shows holes in trenddata
+		return self._interpolation.get_age(timestamp_datetime)
+
 
 class Expression(object):
 	_tz = timezone.Timezone().get_tz()
@@ -78,7 +83,7 @@ class Expression(object):
 			except StopIteration:
 				pass
 
-		# request items from both generators, always returning smaller value
+		# request items from all generators, always returning smaller value
 		while tstamp_generator_list:
 			# consuming timestamps, returning always oldest one, updating first element
 			# sorting list of tuples: http://stackoverflow.com/questions/10695139/sort-a-list-of-tuples-by-2nd-item-integer-value
@@ -109,12 +114,14 @@ class Expression(object):
 		for tstamp_obj in self._get_timestamps_generator(start_datetime, stop_datetime):
 
 			# set test condition for eval(): building local variables dictionary with all values
+			# updating "age" as maximum of "age" of all variables (higher means less relevant)
+			curr_age = 0
 			mylocals = {}
-
 			for curr_var in self._variables_list:
 				var_name = curr_var.get_var_name()
 				curr_val = curr_var.get_value(tstamp_obj.tstamp_dt)
 				mylocals[var_name] = curr_val
+				curr_age = max(curr_age, curr_var.get_age(tstamp_obj.tstamp_dt))
 
 			# evaluate given expression with current variable values
 			try:
@@ -137,6 +144,7 @@ def main(argv=None):
 	                             var_name_str='AT',
 	                             interpolation_type_int=Interpolation.INTERPOLATION_ANALOG,
 	                             value_type_int=Variable.TYPE_FLOAT))
+
 	my_vars_list.append(Variable(projectpath_str='C:\Promos15\proj\Foo',
 	                             dms_dp_str='NS_MSR01a:H01:VerdUwp:RM_Ein',
 	                             var_name_str='UWP',
@@ -150,7 +158,7 @@ def main(argv=None):
 			start_datetime=datetime.datetime(year=2017, month=2, day=1, hour=0, minute=0, tzinfo=curr_tz),
 			stop_datetime=datetime.datetime(year=2017, month=2, day=1, hour=0, minute=10, tzinfo=curr_tz),
 	):
-		print(str(tstamp_obj.tstamp_dt) + ': expression is ' + str(tstamp_obj.value))
+		print(str(tstamp_obj.tstamp_dt) + ': expression is ' + str(tstamp_obj.value) + ', highest age in seconds: ' + str(tstamp_obj.age))
 
 	return 0  # success
 
