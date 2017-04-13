@@ -21,6 +21,8 @@ import datetime
 import misc.timezone as timezone
 from trend.datasource.trendInterpolation import Interpolation
 from operator import itemgetter
+import collections
+import sys
 
 
 class Variable(object):
@@ -73,12 +75,18 @@ class Expression(object):
 		if not stop_datetime:
 			stop_datetime = datetime.datetime(year=3000, month=1, day=1).replace(tzinfo=Expression._tz)
 
+		class _TStamp_iter_source(object):
+			"""helper class for timestamp generators"""
+			def __init__(self, head_elem, iterator):
+				self.head_elem = head_elem
+				self.iterator = iterator
+
 		tstamp_generator_list = []
 		for var in self._variables_list:
 			try:
-				source = var.get_interpolation().get_dbdata_timestamps_generator(start_datetime, stop_datetime)
-				# this list always contains head element from iterator, and iterator itself
-				new_source = [source.next(), source]
+				curr_iter = var.get_interpolation().get_dbdata_timestamps_generator(start_datetime, stop_datetime)
+				# this object always contains head element from iterator, and iterator itself
+				new_source = _TStamp_iter_source(curr_iter.next(), curr_iter)
 				tstamp_generator_list.append(new_source)
 			except StopIteration:
 				pass
@@ -88,19 +96,20 @@ class Expression(object):
 			# consuming timestamps, returning always oldest one, updating first element
 			# sorting list of tuples: http://stackoverflow.com/questions/10695139/sort-a-list-of-tuples-by-2nd-item-integer-value
 			# =>getting source list with oldest timestamp
-			tstamp_generator_list = sorted(tstamp_generator_list, key=itemgetter(0))
-			oldest_source_list = tstamp_generator_list[0]
-			curr_tstamp, curr_iter = oldest_source_list[0], oldest_source_list[1]
-			yield curr_tstamp
+			key_func = lambda tstamp_iter_source: tstamp_iter_source.head_elem.tstamp_dt
+			tstamp_generator_list = sorted(tstamp_generator_list, key=key_func)
+			oldest_source_obj = tstamp_generator_list[0]
+			curr_tstamp_obj = oldest_source_obj.head_elem
+			yield curr_tstamp_obj
 			try:
 				# update head-element of current timestamp source
-				oldest_source_list[0] = curr_iter.next()
+				oldest_source_obj.head_elem = oldest_source_obj.iterator.next()
 			except StopIteration:
 				# iterator is empty... =>removing this timestamp-source
 				tstamp_generator_list = tstamp_generator_list[1:]
 
 
-	def get_evaluation_generator(self, expr_str, start_datetime=None, stop_datetime=None):
+	def get_evaluation_generator(self, binary_expr_str, start_datetime=None, stop_datetime=None):
 		"""
 		evaluate given expression at every available timestamp
 		"""
@@ -122,11 +131,12 @@ class Expression(object):
 				curr_val = curr_var.get_value(tstamp_obj.tstamp_dt)
 				mylocals[var_name] = curr_val
 				curr_age = max(curr_age, curr_var.get_age(tstamp_obj.tstamp_dt))
+			tstamp_obj.age = curr_age
 
 			# evaluate given expression with current variable values
 			try:
 				# calling eval() mostly safe (according to http://lybniz2.sourceforge.net/safeeval.html )
-				tstamp_obj.value = eval(expr_str, {}, mylocals)
+				tstamp_obj.value = eval(binary_expr_str, {}, mylocals)
 			except Exception as ex:
 				# current expression contains errors...
 				print('\tExpression.get_evaluation_generator() throwed exception during evaluation: "' + repr(ex) + '"')
@@ -134,10 +144,60 @@ class Expression(object):
 			yield tstamp_obj
 
 
+	def get_timespans_while_eval_true_generator(self, binary_expr_str, start_datetime=None, stop_datetime=None, duration_seconds=300, max_age_seconds=900):
+		"""
+		evaluate given expression at every available timestamp,
+		yields Timespan objects containing begin and end timestamp,
+		when this expression evaluates to True during specific amount of seconds as minimal duration
+		and all available values are "fresher" than given max_age_seconds
+		(=>caller has to iterate himself over these timespans;
+		we got "MemoryError"s when trying to collect lists of all available timestamps)
+		"""
+
+		assert duration_seconds >= 0, 'parameter "duration_seconds" has to be a positive integer'
+		assert max_age_seconds > 0, 'sane values of maximal age: a bit higher than maximum interval of all involved variables'
+
+		class _Timespan(object):
+			def __init__(self, start_datetime):
+				self.start_datetime = start_datetime
+				self.stop_datetime = None
+				self.nof_tstamps = 0
+
+		curr_timespan = None
+		for tstamp_obj in self.get_evaluation_generator(binary_expr_str, start_datetime, stop_datetime):
+			if tstamp_obj.value and tstamp_obj.age <= max_age_seconds:
+				# expression evaluates to True and is "fresh"
+				if not curr_timespan:
+					# =>begin of new list
+					curr_timespan = _Timespan(tstamp_obj.tstamp_dt)
+				curr_timespan.nof_tstamps += 1
+			else:
+				# expression evaluates to False =>return last Timespan object, reset everything
+				if curr_timespan:
+					curr_duration = abs((curr_timespan.start_datetime - tstamp_obj.tstamp_dt).total_seconds())
+					if curr_duration >= duration_seconds:
+						# found timespan where expression evaluates long enough to True
+						# =>save it for caller
+						curr_timespan.stop_datetime = tstamp_obj.tstamp_dt
+						yield curr_timespan
+					curr_timespan = None
+
+
+	def get_value_of_variable(self, var_name_str, timestamp_datetime):
+		"""retrieving interpolated value of given variable at given timestamp"""
+
+		# searching variable
+		for var in self._variables_list:
+			if var._var_name_str == var_name_str:
+				return var.get_value(timestamp_datetime)
+		raise AttributeError('variable "' + var_name_str + '" is unknown to current expression object!')
+
+
 
 def main(argv=None):
 	curr_tz = timezone.Timezone().get_tz()
 
+	# evaluate expression over trenddata
 	my_vars_list = []
 	my_vars_list.append(Variable(projectpath_str='C:\Promos15\proj\Foo',
 	                             dms_dp_str='NS_MSR01a:H01:AussenTemp:Istwert',
@@ -154,11 +214,38 @@ def main(argv=None):
 	curr_expr = Expression(my_vars_list)
 
 	for tstamp_obj in curr_expr.get_evaluation_generator(
-			expr_str='AT > 0.0 and UWP',
+			binary_expr_str='AT > 0.0 and UWP',
 			start_datetime=datetime.datetime(year=2017, month=2, day=1, hour=0, minute=0, tzinfo=curr_tz),
 			stop_datetime=datetime.datetime(year=2017, month=2, day=1, hour=0, minute=10, tzinfo=curr_tz),
 	):
 		print(str(tstamp_obj.tstamp_dt) + ': expression is ' + str(tstamp_obj.value) + ', highest age in seconds: ' + str(tstamp_obj.age))
+
+
+
+
+	# search in trenddata for timeperiods where expression is True
+	with open(r'd:\output_timespans_while_eval_true.txt', 'w') as f:
+		f.write('\t'.join(['timestamp', 'AT', 'UWP']) + '\n')
+		for curr_timespan in curr_expr.get_timespans_while_eval_true_generator(
+			binary_expr_str='AT > 0.0 and UWP',
+			start_datetime=datetime.datetime(year=2017, month=2, day=1, hour=0, minute=0, tzinfo=curr_tz),
+			stop_datetime=datetime.datetime(year=2017, month=2, day=6, hour=0, minute=0, tzinfo=curr_tz),
+			duration_seconds=3600
+		):
+			print('\n' + '*' * 10)
+			print('\tfound timespan where expression evaluates to True for more than one hour:')
+			print('\tstart: ' + str(curr_timespan.start_datetime))
+			print('\tstop: ' + str(curr_timespan.stop_datetime))
+			print('\tnumber of timestamps: ' + str(curr_timespan.nof_tstamps))
+
+			# FIXME: the following code doesn't run to the end because of "MemoryError" exception... =>refactoring of trendfile.py needed!!!
+			for tstamp_obj in curr_expr._get_timestamps_generator(
+					start_datetime=curr_timespan.start_datetime,
+					stop_datetime=curr_timespan.stop_datetime
+			):
+				value1_str = str(curr_expr.get_value_of_variable('AT', tstamp_obj.tstamp_dt))
+				value2_str = str(curr_expr.get_value_of_variable('UWP', tstamp_obj.tstamp_dt))
+				f.write('\t'.join([str(tstamp_obj.tstamp_dt), value1_str, value2_str]) + '\n')
 
 	return 0  # success
 

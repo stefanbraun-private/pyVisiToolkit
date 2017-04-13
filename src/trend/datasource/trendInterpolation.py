@@ -90,10 +90,9 @@ class Interpolation(object):
 
 
 	def _DBData_Timestamp_Search_Result_wrapper(self, timestamp_datetime):
-		if self._srcache.tstamp_datetime == timestamp_datetime:
-			if self._srcache.search_result:
-				# using cached search result
-				return self._srcache.search_result
+		if self._srcache.tstamp_datetime == timestamp_datetime and self._srcache.search_result:
+			# using cached search result
+			return self._srcache.search_result
 		else:
 			# doing fresh search, update cache
 			self._srcache.search_result = self._meta_trf.get_DBData_Timestamp_Search_Result(timestamp_datetime)
@@ -211,6 +210,17 @@ def main(argv=None):
 			stop_datetime=datetime.datetime(year=2017, month=2, day=1, hour=4, tzinfo=curr_tz),
 			interval_timedelta=datetime.timedelta(hours=1)):
 		print('val = ' + str(val) + ', type is ' + str(type(val)))
+
+	# testing Interpolation.interpolated_floats_generator()
+	print('\n\ntesting Interpolation.interpolated_floats_generator()')
+	print('**********************************************************')
+	with open(r'd:\foo_Aussentemp.csv', "w") as f:
+		for val in my_analog_trend.interpolated_floats_generator(
+				start_datetime=datetime.datetime(year=2017, month=2, day=1, hour=0, tzinfo=curr_tz),
+				stop_datetime=datetime.datetime(year=2017, month=2, day=10, hour=0, tzinfo=curr_tz),
+				interval_timedelta=datetime.timedelta(minutes=10)):
+			val_str = str(val)
+			f.write(';'.join([val_str]) + '\n')
 
 
 

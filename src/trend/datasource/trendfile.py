@@ -442,7 +442,7 @@ class Trendfile_Cache_Handler(object):
 	used_cache_size = 0
 
 	# soft-limit of maximum cache size
-	CACHESIZE_KBYTES = 1024 * 100  # 100MBytes
+	CACHESIZE_KBYTES = 1024 * 50  # 50MBytes
 
 	def get_trendfile_obj(self, filename_fullpath, cached=True):
 		"""optional parameter 'cached': False means working on an isolated Trendfile without interfering other instance holders
@@ -629,6 +629,7 @@ class MetaTrendfile(object):
 		=>remember: every search must return either an exact match or the values just before and after it, except first or last DBData!
 		"""
 
+		# FIXME: this method is too heavy and should be optimized... =>rewrite it!!!
 		search_result_list = []
 		try:
 			# searching in project directory
@@ -926,11 +927,12 @@ class MetaTrendfile(object):
 
 			def __init__(self, curr_tstamp_dt):
 				self.tstamp_dt = curr_tstamp_dt
+				self.is_interpolated = False
 				if not Tstamp.old_tstamp_dt:
-					# first run =>first timestamp is always okay and should have age = 0
-					self.age = 0.0
+					# first run =>first timestamp is always okay and should have timediff = 0
+					self.timediff = 0.0
 				else:
-					self.age = (curr_tstamp_dt - Tstamp.old_tstamp_dt).total_seconds()
+					self.timediff = (curr_tstamp_dt - Tstamp.old_tstamp_dt).total_seconds()
 				Tstamp.old_tstamp_dt = curr_tstamp_dt
 
 
@@ -1113,6 +1115,20 @@ def main(argv=None):
 		for item in mytrf.get_dbdata_lists_generator(start, end):
 			x = x + 1
 		print('\t\t=>' + str(x) + ' unique timestamps.')
+
+
+	# testing MetaTrendfile.get_dbdata_timestamps_generator()
+	print('\n\ntesting MetaTrendfile.get_dbdata_timestamps_generator()')
+	print('**********************************************************')
+	curr_trf = MetaTrendfile(r'C:\Promos15\proj\Foo', 'NS_MSR01a:H01:AussenTemp:Istwert')
+	with open(r'd:\foo_Aussentemp.csv', "w") as f:
+		for tstamp in curr_trf.get_dbdata_timestamps_generator(
+				start_datetime=datetime.datetime(year=2017, month=2, day=1, hour=0, minute=0, tzinfo=MetaTrendfile._tz),
+				stop_datetime=datetime.datetime(year=2017, month=2, day=6, hour=0, minute=0, tzinfo=MetaTrendfile._tz)
+		):
+			tstamp_str = str(tstamp.tstamp_dt)
+			timediff_str = str(tstamp.timediff)
+			f.write(';'.join([tstamp_str, timediff_str]) + '\n')
 
 
 	return 0  # success
