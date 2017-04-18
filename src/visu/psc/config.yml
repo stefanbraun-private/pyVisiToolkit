@@ -286,10 +286,18 @@ ACCESS_RIGHTS:      &ACCESS_RIGHTS
 # all common text properties
 TEXT:             &TEXT
   v15:            &TEXT_v15
-    text-string:
+    text_string:
       _linemark: DIV
       _obj: str
       _regexpattern: (DIV;\d+;\d+;)(.*)(;\d+)
+    text_font_name:
+      _linemark: FNT
+      _obj: str
+      _split: 14
+    text_font_size:     # attention: relation between font size value and number of dots is unknown and not linear!
+      _linemark: FNT
+      _obj: int
+      _split: 4
   v16:    &TEXT_v16
     <<:   *TEXT_v15
   v17:    &TEXT_v17
@@ -482,12 +490,15 @@ Button:
   v15:
     <<:     *GENERIC_v15
     <<:     *ACCESS_RIGHTS_v15
+    <<:     *TEXT_v15
   v16:
     <<:     *GENERIC_v16
     <<:     *ACCESS_RIGHTS_v16
+    <<:     *TEXT_v16
   v17:
     <<:     *GENERIC_v17
     <<:     *ACCESS_RIGHTS_v17
+    <<:     *TEXT_v17
 Checkbox:
   v15:
     <<:     *GENERIC_v15

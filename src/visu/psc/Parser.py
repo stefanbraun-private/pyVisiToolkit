@@ -491,12 +491,16 @@ def main(argv=None):
 		my_print(u'\tgroup: ' + str(curr_group.get_value()))
 
 		if isinstance(elem, PscText):
-			curr_string = elem.get_property(u'text-string')
-			my_print(u'\t\ttext-string: ' + curr_string.get_value())
+			curr_string = elem.get_property(u'text_string')
+			my_print(u'\t\ttext_string: ' + curr_string.get_value())
 			# test: append string to current string
 			curr_string.set_value(curr_string.get_value() + u'ADDED_TEXT')
-			elem.set_property(u'text-string', curr_string)
-			my_print(u'\t\ttext-string (changed): ' + elem.get_property(u'text-string').get_value())
+			elem.set_property(u'text_string', curr_string)
+			my_print(u'\t\ttext_string (changed): ' + str(elem.get_property(u'text_string').get_value()))
+
+			# font attributes
+			my_print(u'\t\ttext_font_name: ' + elem.get_property(u'text_font_name').get_value())
+			my_print(u'\t\ttext_font_size: ' + str(elem.get_property(u'text_font_size').get_value()))
 
 		if isinstance(elem, PscButton):
 			try:
@@ -511,6 +515,22 @@ def main(argv=None):
 					my_print(u'\t\t' + right + u' changed to ' + repr(elem.get_property(right)))
 			except KeyError:
 				my_print(u'\t\t=>button does not contain accessrights...')
+
+			# buttons can contain text....
+			curr_string = elem.get_property(u'text_string')
+			my_print(u'\t\ttext_string: ' + curr_string.get_value())
+			# test: append string to current string
+			curr_string.set_value(curr_string.get_value() + u'ADDED_TEXT')
+			elem.set_property(u'text_string', curr_string)
+			my_print(u'\t\ttext_string (changed): ' + elem.get_property(u'text_string').get_value())
+
+			# font attributes
+			my_print(u'\t\ttext_font_name: ' + elem.get_property(u'text_font_name').get_value())
+			curr_font_size = elem.get_property(u'text_font_size')
+			my_print(u'\t\ttext_font_size: ' + str(curr_font_size.get_value()))
+			curr_font_size.set_value(-24)
+			elem.set_property(u'text_font_size', curr_font_size)
+			my_print(u'\t\ttext_font_size (changed): ' + str(curr_font_size.get_value()))
 
 		if isinstance(elem, PscLine):
 			curr_color = elem.get_property(u'color-fg')
