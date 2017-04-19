@@ -77,6 +77,42 @@ class PscVar_int(PscVariable):
 		return unicode(self._value)
 
 
+class PscVar_fontsize(PscVariable):
+	'''
+	Fontsize representation in PSC files
+	"-13 raw_dots" means "10 dots" (represented as "10 pixels")
+	"-96 raw_dots" means "72 dots" (represented as "72 pixels")
+
+	=>internally we store "dots" (equal to shown pixel height on screen)
+
+	raw_fontsize_in_dots = dots_per_inch * shown_fontsize_in_dots / 72
+	=>using resolution of 96 dots_per_inch works, see following URLs:
+	https://www.experts-exchange.com/questions/10300797/Fonts-and-Printing.html#a2557800
+	https://blogs.msdn.microsoft.com/fontblog/2005/11/08/where-does-96-dpi-come-from-in-windows/
+	'''
+	DPI = 96
+
+	def __init__(self, int_val):
+		self.set_value(int_val)
+
+	def set_value(self, new_val):
+		self._value = self._rawdots_to_dots(int(new_val))
+
+	def get_value(self):
+		return self._value
+
+	def get_serialized(self):
+		# return format used in PSC file
+		# turn into string, then into unicode
+		return unicode(self._dots_to_rawdots(self._value))
+
+	def _dots_to_rawdots(self, dots):
+		return -(dots * PscVar_fontsize.DPI / 72)
+
+	def _rawdots_to_dots(self, rawdots):
+		return -(rawdots * 72 / PscVar_fontsize.DPI)
+
+
 class PscVar_float(PscVariable):
 	'''
 	Float representation in PSC files

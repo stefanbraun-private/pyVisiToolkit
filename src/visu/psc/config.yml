@@ -21,7 +21,7 @@
 # <property>    id, bmo-class, group, ...
 # <PSC CSV details> linemark (WIN, ID, LIB, PSDV, ...), location details and which Python object represents this data
 #
-# list of known Python objects (from Parser.py):
+# list of known Python objects (from ParserVars.py):
 # str:  PscVar_str
 # int:  PscVar_int
 # float: PscVar_float
@@ -30,6 +30,7 @@
 # line_style: PscVar_line_style
 # value_rgb_pairs: PscVar_value_rgb_pairs
 # RGB: RGB
+# fontsize: PscVar_fontsize
 #
 # possible location details:
 #
@@ -294,9 +295,9 @@ TEXT:             &TEXT
       _linemark: FNT
       _obj: str
       _split: 14
-    text_font_size:     # attention: relation between font size value and number of dots is unknown and not linear!
+    text_font_size:
       _linemark: FNT
-      _obj: int
+      _obj: fontsize
       _split: 4
   v16:    &TEXT_v16
     <<:   *TEXT_v15
@@ -503,12 +504,15 @@ Checkbox:
   v15:
     <<:     *GENERIC_v15
     <<:     *ACCESS_RIGHTS_v15
+    <<:     *TEXT_v15
   v16:
     <<:     *GENERIC_v16
     <<:     *ACCESS_RIGHTS_v16
+    <<:     *TEXT_v16
   v17:
     <<:     *GENERIC_v17
     <<:     *ACCESS_RIGHTS_v17
+    <<:     *TEXT_v17
 Circle:
   v15:
     <<:     *GENERIC_v15
@@ -520,22 +524,28 @@ Combobox:
   v15:
     <<:     *GENERIC_v15
     <<:     *ACCESS_RIGHTS_v15
+    <<:     *TEXT_v15
   v16:
     <<:     *GENERIC_v16
     <<:     *ACCESS_RIGHTS_v16
+    <<:     *TEXT_v16
   v17:
     <<:     *GENERIC_v17
     <<:     *ACCESS_RIGHTS_v17
+    <<:     *TEXT_v17
 Editbox:
   v15:
     <<:     *GENERIC_v15
     <<:     *ACCESS_RIGHTS_v15
+    <<:     *TEXT_v15
   v16:
     <<:     *GENERIC_v16
     <<:     *ACCESS_RIGHTS_v16
+    <<:     *TEXT_v16
   v17:
     <<:     *GENERIC_v17
     <<:     *ACCESS_RIGHTS_v17
+    <<:     *TEXT_v17
 Icon:
   v15:
     <<:     *GENERIC_v15
@@ -557,12 +567,15 @@ Radio Button:
   v15:
     <<:     *GENERIC_v15
     <<:     *ACCESS_RIGHTS_v15
+    <<:     *TEXT_v15
   v16:
     <<:     *GENERIC_v16
     <<:     *ACCESS_RIGHTS_v16
+    <<:     *TEXT_v16
   v17:
     <<:     *GENERIC_v17
     <<:     *ACCESS_RIGHTS_v17
+    <<:     *TEXT_v17
 Rectangle:
   v15:
     <<:     *GENERIC_v15

@@ -203,7 +203,8 @@ class Mapping(object):
 	            u'rectangle': visu.psc.ParserVars.PscVar_rectangle,
 	            u'line_style': visu.psc.ParserVars.PscVar_line_style,
 	            u'value_rgb_pairs': visu.psc.ParserVars.PscVar_value_rgb_pairs,
-	            u'RGB': visu.psc.ParserVars.PscVar_RGB}
+	            u'RGB': visu.psc.ParserVars.PscVar_RGB,
+	            u'fontsize': visu.psc.ParserVars.PscVar_fontsize}
 
 	def __init__(self, linemark_str = '', regex_pattern_str = '', property_obj_str = ''):
 		self.linemark = unicode(linemark_str, encoding=ENCODING_FILES_PSC)
