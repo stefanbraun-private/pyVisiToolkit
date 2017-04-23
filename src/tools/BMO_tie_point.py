@@ -20,6 +20,9 @@ import dms.datapoint
 import misc.clipboard
 import Tkinter as tk
 import functools
+import pywinauto.application
+import misc.visi_binaries
+import os
 
 DEBUGGING = True
 
@@ -127,7 +130,7 @@ class TiepointGui(tk.Tk):
 
 	def __init__(self, tiepoint, clipboard):
 		tk.Tk.__init__(self)
-		self.title("BMO Tie-Point-Info v0.0.1")
+		self.title("BMO Tie-Point-Info v0.0.2")
 		self.resizable(0, 0)
 		self.tiepoint = tiepoint
 		self.clipboard = clipboard
@@ -316,7 +319,12 @@ class _Dp_frame(tk.Frame):
 		column_idx = column_idx + 2
 		# header cell: open popup window with serialized DMS format
 		lab = tk.Label(master=self.frame, text='serialized DMS', borderwidth=1, relief=tk.SUNKEN)
-		lab.grid(row=row_idx, column=column_idx, padx=1, pady=1, columnspan=2, sticky='NSEW')
+		lab.grid(row=row_idx, column=column_idx, padx=1, pady=1, sticky='NSEW')
+		column_idx = column_idx + 1
+		# header cell: start external program for manipulation of value of DMS datapoint
+		lab = tk.Label(master=self.frame, text='execute program', borderwidth=1, relief=tk.SUNKEN)
+		lab.grid(row=row_idx, column=column_idx, padx=1, pady=1, sticky='NSEW')
+
 
 		row_idx = row_idx + 1
 		for child in sorted(self.tiepoint.dp_dict):
@@ -395,6 +403,11 @@ class _Dp_frame(tk.Frame):
 				btn = tk.Button(master=self.frame, text='popup window', command=myfunc)
 				btn.grid(row=row_idx, column=8, sticky=tk.N + tk.S + tk.E + tk.W)
 
+				# button: start external program for manipulation of DMS datapoint
+				myfunc = functools.partial(self._cb_start_SetDMSVal, child)
+				btn = tk.Button(master=self.frame, text='SetDMSVal', command=myfunc)
+				btn.grid(row=row_idx, column=9, sticky=tk.N + tk.S + tk.E + tk.W)
+
 
 				row_idx = row_idx  + 1
 
@@ -455,6 +468,34 @@ class _Dp_frame(tk.Frame):
 		dms_fullkey = ':'.join([self.tiepoint.bmo_instance, child])
 		curr_text = self.tiepoint.curr_dms.get_serialized_dms_format(dms_fullkey)
 		popup_win = _Popup_text(curr_text)
+
+
+	def _cb_start_SetDMSVal(self, child):
+		'''
+		uses Pywinauto for starting "SetDMSVal.exe"(c) and doing a DMS read with current DMS datapoint
+		=>with this official userprogram it's possible to read and set a DMS value
+		(it's a pity that this program has no command line arguments,
+		while "plist.exe"(c) could be started with DMS datapoint. In both programs values don't get live updated...)
+		'''
+
+		dms_fullkey = ':'.join([self.tiepoint.bmo_instance, child])
+		# FIXME: how to handle execution on systems without Visi.Plus(c)? ...
+		exe_path = misc.visi_binaries.get_fullpath()
+		exe_fullpath = os.path.join(exe_path, u'SetDMSVal.exe')
+
+		# with help from https://github.com/pywinauto/pywinauto
+		# and code generator (Win32 executable) https://github.com/pywinauto/SWAPY
+		app = pywinauto.application.Application().Start(cmd_line=exe_fullpath)
+		window = app.Dialog
+		window.Wait('ready')
+
+		# write DMS key into search field and do a reading
+		# FIXME: "Lesen" is German text on search button... How to internationalize this part?
+		edit = window.Edit
+		edit.set_edit_text(dms_fullkey)
+		window.Lesen.click()
+
+
 
 
 class _Filter_frame(tk.Frame):

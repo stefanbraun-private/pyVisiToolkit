@@ -485,77 +485,97 @@ Line:
     <<:     *LINE-WIDTH
   v16:
     <<:     *GENERIC_v16
+    <<:     *ENDPOINTS
   v17:
     <<:     *GENERIC_v17
+    <<:     *ENDPOINTS
 Button:
   v15:
     <<:     *GENERIC_v15
     <<:     *ACCESS_RIGHTS_v15
     <<:     *TEXT_v15
+    <<:     *ENDPOINTS
   v16:
     <<:     *GENERIC_v16
     <<:     *ACCESS_RIGHTS_v16
     <<:     *TEXT_v16
+    <<:     *ENDPOINTS
   v17:
     <<:     *GENERIC_v17
     <<:     *ACCESS_RIGHTS_v17
     <<:     *TEXT_v17
+    <<:     *ENDPOINTS
 Checkbox:
   v15:
     <<:     *GENERIC_v15
     <<:     *ACCESS_RIGHTS_v15
     <<:     *TEXT_v15
+    <<:     *ENDPOINTS
   v16:
     <<:     *GENERIC_v16
     <<:     *ACCESS_RIGHTS_v16
     <<:     *TEXT_v16
+    <<:     *ENDPOINTS
   v17:
     <<:     *GENERIC_v17
     <<:     *ACCESS_RIGHTS_v17
     <<:     *TEXT_v17
+    <<:     *ENDPOINTS
 Circle:
   v15:
     <<:     *GENERIC_v15
+    <<:     *ENDPOINTS
   v16:
     <<:     *GENERIC_v16
+    <<:     *ENDPOINTS
   v17:
     <<:     *GENERIC_v17
+    <<:     *ENDPOINTS
 Combobox:
   v15:
     <<:     *GENERIC_v15
     <<:     *ACCESS_RIGHTS_v15
     <<:     *TEXT_v15
+    <<:     *ENDPOINTS
   v16:
     <<:     *GENERIC_v16
     <<:     *ACCESS_RIGHTS_v16
     <<:     *TEXT_v16
+    <<:     *ENDPOINTS
   v17:
     <<:     *GENERIC_v17
     <<:     *ACCESS_RIGHTS_v17
     <<:     *TEXT_v17
+    <<:     *ENDPOINTS
 Editbox:
   v15:
     <<:     *GENERIC_v15
     <<:     *ACCESS_RIGHTS_v15
     <<:     *TEXT_v15
+    <<:     *ENDPOINTS
   v16:
     <<:     *GENERIC_v16
     <<:     *ACCESS_RIGHTS_v16
     <<:     *TEXT_v16
+    <<:     *ENDPOINTS
   v17:
     <<:     *GENERIC_v17
     <<:     *ACCESS_RIGHTS_v17
     <<:     *TEXT_v17
+    <<:     *ENDPOINTS
 Icon:
   v15:
     <<:     *GENERIC_v15
     <<:     *ACCESS_RIGHTS_v15
+    <<:     *ENDPOINTS
   v16:
     <<:     *GENERIC_v16
     <<:     *ACCESS_RIGHTS_v16
+    <<:     *ENDPOINTS
   v17:
     <<:     *GENERIC_v17
     <<:     *ACCESS_RIGHTS_v17
+    <<:     *ENDPOINTS
 Polyline:
   v15:
     <<:     *GENERIC_v15
@@ -568,49 +588,67 @@ Radio Button:
     <<:     *GENERIC_v15
     <<:     *ACCESS_RIGHTS_v15
     <<:     *TEXT_v15
+    <<:     *ENDPOINTS
   v16:
     <<:     *GENERIC_v16
     <<:     *ACCESS_RIGHTS_v16
     <<:     *TEXT_v16
+    <<:     *ENDPOINTS
   v17:
     <<:     *GENERIC_v17
     <<:     *ACCESS_RIGHTS_v17
     <<:     *TEXT_v17
+    <<:     *ENDPOINTS
 Rectangle:
   v15:
     <<:     *GENERIC_v15
+    <<:     *ENDPOINTS
   v16:
     <<:     *GENERIC_v16
+    <<:     *ENDPOINTS
   v17:
     <<:     *GENERIC_v17
+    <<:     *ENDPOINTS
 Round Rectangle:
   v15:
     <<:     *GENERIC_v15
+    <<:     *ENDPOINTS
   v16:
     <<:     *GENERIC_v16
+    <<:     *ENDPOINTS
   v17:
     <<:     *GENERIC_v17
+    <<:     *ENDPOINTS
 Ruler:
   v15:
     <<:     *GENERIC_v15
+    <<:     *ENDPOINTS
   v16:
     <<:     *GENERIC_v16
+    <<:     *ENDPOINTS
   v17:
     <<:     *GENERIC_v17
+    <<:     *ENDPOINTS
 Text:
   v15:
     <<:     *GENERIC_v15
     <<:     *TEXT_v15
+    <<:     *ENDPOINTS
   v16:
     <<:     *GENERIC_v16
     <<:     *TEXT_v16
+    <<:     *ENDPOINTS
   v17:
     <<:     *GENERIC_v17
     <<:     *TEXT_v17
+    <<:     *ENDPOINTS
 Trend:
   v15:
     <<:     *GENERIC_v15
+    <<:     *ENDPOINTS
   v16:
     <<:     *GENERIC_v16
+    <<:     *ENDPOINTS
   v17:
     <<:     *GENERIC_v17
+    <<:     *ENDPOINTS

@@ -80,6 +80,7 @@ class PscVar_int(PscVariable):
 class PscVar_fontsize(PscVariable):
 	'''
 	Fontsize representation in PSC files
+	"-11 raw_dots" means "8 dots" (represented as "8 pixels")
 	"-13 raw_dots" means "10 dots" (represented as "10 pixels")
 	"-96 raw_dots" means "72 dots" (represented as "72 pixels")
 
@@ -93,10 +94,10 @@ class PscVar_fontsize(PscVariable):
 	DPI = 96
 
 	def __init__(self, int_val):
-		self.set_value(int_val)
+		self._value = self._rawdots_to_dots(int(int_val))
 
 	def set_value(self, new_val):
-		self._value = self._rawdots_to_dots(int(new_val))
+		self._value = abs(int(new_val))
 
 	def get_value(self):
 		return self._value

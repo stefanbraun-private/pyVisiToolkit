@@ -528,7 +528,7 @@ def main(argv=None):
 			my_print(u'\t\ttext_font_name: ' + elem.get_property(u'text_font_name').get_value())
 			curr_font_size = elem.get_property(u'text_font_size')
 			my_print(u'\t\ttext_font_size: ' + str(curr_font_size.get_value()))
-			curr_font_size.set_value(-24)
+			curr_font_size.set_value(24)
 			elem.set_property(u'text_font_size', curr_font_size)
 			my_print(u'\t\ttext_font_size (changed): ' + str(curr_font_size.get_value()))
 
