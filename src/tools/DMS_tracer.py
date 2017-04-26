@@ -24,7 +24,7 @@ import argparse
 import time
 from datetime import datetime
 
-POLL_INTERVAL_SECONDS = 1
+POLL_PAUSE_SECONDS = 1
 
 class Node(object):
 	def __init__(self, value, datatype_str):
@@ -84,7 +84,9 @@ def main(dms_node_str):
 		return 0
 
 	old_keys_dict = {}
-	new_keys_dict = {}
+
+	# suppress showing of all DMS keys as "ADDED" on first run
+	first_run = True
 
 	# help from http://stackoverflow.com/questions/13180941/how-to-kill-a-while-loop-with-a-keystroke
 	try:
@@ -95,36 +97,39 @@ def main(dms_node_str):
 			new_keys_dict = get_dms_tree_as_dict(curr_dms=curr_dms, dms_node_str=dms_node_str)
 			new_keys_set = set(new_keys_dict.keys())
 
-			# check for deleted DMS keys
-			for dms_key in sorted(old_keys_set - new_keys_set):
-				old_node = old_keys_dict[dms_key]
-				change_str = 'DELETED:'
-				type_str = '[' + old_node.datatype_str + ']'
-				value_str = '(' + str(old_node.value) + ')'
-				print_with_timestamp('\t'.join([change_str, type_str, dms_key, value_str]))
-
-			# check for changed DMS keys
-			for dms_key in sorted(old_keys_set & new_keys_set):
-				old_node = old_keys_dict[dms_key]
-				new_node = new_keys_dict[dms_key]
-				if old_node.value != new_node.value:
-					change_str = 'CHANGED:'
-					if old_node.datatype_str != new_node.datatype_str:
-						type_str = '[' + old_node.datatype_str + ']=>[' + new_node.datatype_str + ']'
-					else:
-						type_str = '[' + old_node.datatype_str + ']'
-					value_str = '(' + str(old_node.value) + ')=>(' + str(new_node.value) + ')'
+			if not first_run:
+				# check for deleted DMS keys
+				for dms_key in sorted(old_keys_set - new_keys_set):
+					old_node = old_keys_dict[dms_key]
+					change_str = 'DELETED:'
+					type_str = '[' + old_node.datatype_str + ']'
+					value_str = '[' + str(old_node.value) + ']'
 					print_with_timestamp('\t'.join([change_str, type_str, dms_key, value_str]))
 
-			# check for added DMS keys
-			for dms_key in sorted(new_keys_set - old_keys_set):
-				new_node = new_keys_dict[dms_key]
-				change_str = 'ADDED:  '
-				type_str = '[' + new_node.datatype_str + ']'
-				value_str = '(' + str(new_node.value) + ')'
-				print_with_timestamp('\t'.join([change_str, type_str, dms_key, value_str]))
+				# check for changed DMS keys
+				for dms_key in sorted(old_keys_set & new_keys_set):
+					old_node = old_keys_dict[dms_key]
+					new_node = new_keys_dict[dms_key]
+					if old_node.value != new_node.value:
+						change_str = 'CHANGED:'
+						if old_node.datatype_str != new_node.datatype_str:
+							type_str = '[' + old_node.datatype_str + ']=>[' + new_node.datatype_str + ']'
+						else:
+							type_str = '[' + old_node.datatype_str + ']'
+						value_str = '[' + str(old_node.value) + ']=>[' + str(new_node.value) + ']'
+						print_with_timestamp('\t'.join([change_str, type_str, dms_key, value_str]))
 
-			time.sleep(POLL_INTERVAL_SECONDS)
+				# check for added DMS keys
+				for dms_key in sorted(new_keys_set - old_keys_set):
+					new_node = new_keys_dict[dms_key]
+					change_str = 'ADDED:  '
+					type_str = '[' + new_node.datatype_str + ']'
+					value_str = '[' + str(new_node.value) + ']'
+					print_with_timestamp('\t'.join([change_str, type_str, dms_key, value_str]))
+			else:
+				first_run = False
+
+			time.sleep(POLL_PAUSE_SECONDS)
 			old_keys_dict = new_keys_dict
 	except KeyboardInterrupt:
 		pass
@@ -136,7 +141,9 @@ def main(dms_node_str):
 if __name__ == '__main__':
 	parser = argparse.ArgumentParser(description='DMS tracer of changed DMS keys.')
 
-	parser.add_argument('DMS_NODE', help='DMS node and all subnodes to trace (e.g. MSR01:H01)')
+	# this positional argument is optional
+	# with help from http://stackoverflow.com/questions/4480075/argparse-optional-positional-arguments
+	parser.add_argument('DMS_NODE', default='BMO', nargs='?', help='DMS node and all subnodes to trace (e.g. MSR01:H01, default is BMO)')
 
 	args = parser.parse_args()
 
