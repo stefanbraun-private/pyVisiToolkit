@@ -546,7 +546,7 @@ class Dmspipe(object):
 		"""
 		set value of unsigned DWORD (in Windows API: 32bit) datapoint
 		"""
-		self.pmospipe.DMS_WriteDWUEx.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_ubyte]
+		self.pmospipe.DMS_WriteDWUEx.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_uint32]
 		self.pmospipe.DMS_WriteDWUEx.restype = ctypes.c_int
 		# if DEBUGGING:
 		# 	print('datapoint_str = ' + datapoint_str)
