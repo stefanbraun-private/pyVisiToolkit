@@ -175,7 +175,8 @@ def main(argv=None):
 
 				# help from http://stackoverflow.com/questions/699866/python-int-to-binary
 				my_print('drawn road "' + "{0:b}".format(new_value).zfill(NOF_COLUMNS))
-				time.sleep(PAUSE_SECONDS)
+				#time.sleep(PAUSE_SECONDS)
+				time.sleep(0.05)
 		except KeyboardInterrupt:
 			pass
 		print('Quitting "misc.Animation"...')
