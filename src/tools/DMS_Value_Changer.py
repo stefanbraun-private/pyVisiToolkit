@@ -4,6 +4,10 @@
 tools.DMS_Value_Changer.py
 Retrieves from a list of DMS keys their current value and allows simple changes of them.
 
+
+Changelog:
+7.7.2017:   Bugfixing: synchronizing scrolling in text widgets, removing empty line at the bottom
+
 Copyright (C) 2016 Stefan Braun
 
 This program is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, either version 2 of the License, or (at your option) any later version.
@@ -176,9 +180,9 @@ class DMS_Vars(object):
 			# Write the file out
 			with io.open(export_fullpath, 'w', encoding=ENCODING) as f:
 				if dp_revision == OLD:
-					export_content = '\n'.join(old_serialized_list)
+					export_content = u'\n'.join(old_serialized_list)
 				else:
-					export_content = '\n'.join(new_serialized_list)
+					export_content = u'\n'.join(new_serialized_list)
 				# handling all strings as unicode strings =>encode to local codepage
 				f.write(export_content)
 				# append one linebreak at the end (DMS does the same in exportfiles)
@@ -315,7 +319,10 @@ class _Button_Frame(tk.Frame):
 		# request all given DMS-keys
 		# and put their metadata and values into our text areas
 		# FIXME: we have always two empty strings at the list end... How to remove them while not causing many exceptions in other code parts?!?
-		key_list = self.text_area_dict['key'].get("1.0",tk.END).split('\n')
+		key_list = self._textarea_as_key_list(self.text_area_dict['key'])
+		if DEBUGGING:
+			print('text_area = ' + repr(self._textarea_as_key_list(self.text_area_dict['key'])))
+			print('key_list = ' + repr(key_list))
 		self.parent.dms_vars.read_from_dms(key_list)
 
 		# put content from DMS into text areas (we need to set them into editable state for doing this)
@@ -357,8 +364,8 @@ class _Button_Frame(tk.Frame):
 
 
 	def _cb_btn_write(self):
-		key_list = self.text_area_dict['key'].get("1.0",tk.END).split('\n')
-		new_val_list = self.text_area_dict['newval'].get("1.0",tk.END).split('\n')
+		key_list = self._textarea_as_key_list(self.text_area_dict['key'])
+		new_val_list = self._textarea_as_key_list(self.text_area_dict['newval'])
 		self.parent.dms_vars.set_values(key_list, new_val_list)
 		error_list = self.parent.dms_vars.write_to_dms(key_list)
 
@@ -374,6 +381,13 @@ class _Button_Frame(tk.Frame):
 		self.btn_write.config(state=tk.NORMAL)
 
 
+	def _textarea_as_key_list(self, textwidget):
+		''' extract key_list always the same way '''
+		# tkinter adds always a newline to last line in every text widget...
+		# =>we have to say "end - 1"!
+		# http://www.tkdocs.com/tutorial/text.html#modifying
+		# http://effbot.org/tkinterbook/entry.htm
+		return textwidget.get("1.0", "end-1c").split('\n')
 
 
 class _Text_Frame(tk.Frame):
@@ -384,7 +398,7 @@ class _Text_Frame(tk.Frame):
 
 
 	def _draw_data_frame(self):
-		yscrollbar = tk.Scrollbar(self)
+		self.yscrollbar = tk.Scrollbar(self)
 
 		row_idx = 0
 		lab = tk.Label(master=self, text="DMS keys")
@@ -401,7 +415,7 @@ class _Text_Frame(tk.Frame):
 
 
 		row_idx += 1
-		self.key_textarea = tk.Text(self, width=80, height=40, wrap="word", yscrollcommand=yscrollbar.set, borderwidth=0, highlightthickness=0)
+		self.key_textarea = tk.Text(self, width=80, height=40, wrap="word", yscrollcommand=self._yscrollbar_set, borderwidth=0, highlightthickness=0)
 		# show some text
 		self.key_textarea.insert(tk.END, 'Please insert a list of DMS keys...')
 		# save reference for external access into text field
@@ -409,7 +423,7 @@ class _Text_Frame(tk.Frame):
 		#self.key_textarea.pack(side="left", fill="both", expand=True)
 		self.key_textarea.grid(row=row_idx, column=0, padx=2, pady=5)
 
-		self.metadata_textarea = tk.Text(self, width=15, height=40, wrap="word", yscrollcommand=yscrollbar.set,  borderwidth=0, highlightthickness=0)
+		self.metadata_textarea = tk.Text(self, width=15, height=40, wrap="word", yscrollcommand=self._yscrollbar_set,  borderwidth=0, highlightthickness=0)
 		# show some text
 		#self.metadata_textarea.insert(tk.END, 'Nothing to show...\n\n\nreally nothing...')
 		# save reference for external access into text field
@@ -418,7 +432,7 @@ class _Text_Frame(tk.Frame):
 		self.metadata_textarea.grid(row=row_idx, column=1, padx=2, pady=5)
 
 
-		self.oldval_textarea = tk.Text(self, width=50, height=40, wrap="word", yscrollcommand=yscrollbar.set,  borderwidth=0, highlightthickness=0)
+		self.oldval_textarea = tk.Text(self, width=50, height=40, wrap="word", yscrollcommand=self._yscrollbar_set,  borderwidth=0, highlightthickness=0)
 		# show some text
 		#self.oldval_textarea.insert(tk.END, 'Nothing to show...\n\n\nreally nothing...')
 		# save reference for external access into text field
@@ -427,7 +441,7 @@ class _Text_Frame(tk.Frame):
 		self.oldval_textarea.grid(row=row_idx, column=2, padx=2, pady=5)
 
 
-		self.newval_textarea = tk.Text(self, width=50, height=40, wrap="word", yscrollcommand=yscrollbar.set, borderwidth=0, highlightthickness=0)
+		self.newval_textarea = tk.Text(self, width=50, height=40, wrap="word", yscrollcommand=self._yscrollbar_set, borderwidth=0, highlightthickness=0)
 		# show some text
 		#self.newval_textarea.insert(tk.END, 'Nothing to show...\n\n\nreally nothing...')
 		# save reference for external access into text field
@@ -436,16 +450,36 @@ class _Text_Frame(tk.Frame):
 		self.newval_textarea.grid(row=row_idx, column=3, padx=2, pady=5)
 
 
-		yscrollbar.config(command=self._scrollbar_command)
+		self.yscrollbar.config(command=self._scrollbar_command)
 		#yscrollbar.pack(side="left", fill="y")
-		yscrollbar.grid(row=row_idx, column=4, sticky=tk.N+tk.S)
+		self.yscrollbar.grid(row=row_idx, column=4, sticky=tk.N+tk.S)
 
-	def _scrollbar_command(self, *kargs):
+
+	def _yscrollbar_set(self, *kargs, **kwargs):
+		# when textfields are scrolled, then we have to scroll the scrollbar
+		# AND inform all textfields about changes
+		# =>it seems that tkinter calls this callback with tuple ('0.0', '1.0') as argument,
+		# read here: http://infohost.nmt.edu/tcc/help/pubs/tkinter/web/scrollbar.html
+
+		#if DEBUGGING:
+		#	print('_yscrollbar_set(): *kargs=' + repr(kargs) + ', **kwargs=' + repr(kwargs))
+
+		self.yscrollbar.set(*kargs)
+
+		# help from https://stackoverflow.com/questions/32038701/python-tkinter-making-two-text-widgets-scrolling-synchronize
+		self._scrollbar_command('moveto', kargs[0])
+
+
+	def _scrollbar_command(self, *kargs, **kwargs):
 		# scrollbar command should inform all three textareas for changes
-		# (it seems that tkinter calls this callback with arguments 'moveto', x.xxx)
-		self.key_textarea.yview(*kargs)
-		self.oldval_textarea.yview(*kargs)
-		self.newval_textarea.yview(*kargs)
+		# =>it seems that tkinter calls this callback with tuple ('moveto', '0.0') as argument,
+		# read here: http://infohost.nmt.edu/tcc/help/pubs/tkinter/web/text-methods.html
+
+		#if DEBUGGING:
+		#	print('_scrollbar_command(): *kargs=' + repr(kargs) + ', **kwargs=' + repr(kwargs))
+
+		for area in self.text_area_dict:
+			self.text_area_dict[area].yview(*kargs)
 
 
 def parse_boolean(curr_str):

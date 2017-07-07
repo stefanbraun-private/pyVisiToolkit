@@ -3,6 +3,10 @@
 """
 tools.PSC_file_selector.py
 
+Changelog:
+7.7.2017:   improving robustness against corrupted PSC files (they raise UnicodeDecodeError)
+
+
 Copyright (C) 2016 Stefan Braun
 
 This program is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, either version 2 of the License, or (at your option) any later version.
@@ -111,7 +115,12 @@ class PscFile(object):
 		if self._last_readtime <> self._modification_time:
 			# first reading or file changed
 			with codecs.open(self._fullpath, 'r', encoding=ENCODING_FILES_PSC) as f:
-				self._whole_file = f.read()
+				try:
+					self._whole_file = f.read()
+				except UnicodeDecodeError as ex:
+					my_print(u'Exception in "get_whole_file()": file "' + self._fullpath + u'" contains wrong characters: ' + repr(ex))
+					my_print(u'=>ignoring this file...')
+					self._whole_file = u''
 				self._last_readtime = self._modification_time
 		return self._whole_file
 
@@ -154,8 +163,8 @@ class Dirlister(object):
 	def __init__(self, path):
 		self._path = path
 		self._filehandler = PscFileHandler()
-		self._re_fname_compiled = re.compile('')
-		self._re_string_compiled = re.compile('')
+		self._re_fname_compiled = re.compile(u'')
+		self._re_string_compiled = re.compile(u'')
 
 	def set_re_fname_pattern(self, re_fname_pattern):
 		"""
@@ -163,7 +172,7 @@ class Dirlister(object):
 		(it's not for better performance, but then GUI can handle exceptions when user enters wrong Regex-syntax)
 		=>must be called when pattern needs an update before get_listing()
 		"""
-		self._re_fname_compiled = re.compile(re_fname_pattern)
+		self._re_fname_compiled = re.compile(self._to_unicode(re_fname_pattern, ENCODING_LOCALE))
 
 	def set_re_string_pattern(self, re_string_pattern):
 		"""
@@ -171,7 +180,17 @@ class Dirlister(object):
 		(it's not for better performance, but then GUI can handle exceptions when user enters wrong Regex-syntax)
 		=>must be called when pattern needs an update before get_listing()
 		"""
-		self._re_string_compiled = re.compile(re_string_pattern)
+		self._re_string_compiled = re.compile(self._to_unicode(re_string_pattern, ENCODING_LOCALE))
+
+	def _to_unicode(self, text, encoding):
+		# tkinter entry widget returns ASCII or unicode, so we should handle all regex operations in unicode
+		# help from https://stackoverflow.com/questions/8036499/unicodewarning-special-characters-in-tkinter
+		try:
+			text = text.decode(encoding)
+		except UnicodeEncodeError:
+			pass
+		return text
+
 
 	def get_listing(self, sort_item=0, reversed=False):
 		# collecting filenames

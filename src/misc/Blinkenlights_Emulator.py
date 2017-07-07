@@ -16,6 +16,11 @@ ideas for improvements:
  ==>currently we have only a monochrome "display" with one bit per pixel, no grayscale or RGB...
 
 
+How does the monochrome display work?
+In "Grafikeditor" it's possible to change color by a binary DMS key. This way we got a monochrome display,
+where we use one BIT value in DMS for each pixel (transmitted as 32bit integer).
+The visibility of each pixel is controlled by enable bits in two 32bit integers,
+this gives a maximal dimension of 32 rows and 32 columns.
 
 
 =>URLs for more information:
