@@ -6,6 +6,7 @@ Retrieves from a list of DMS keys their current value and allows simple changes 
 
 
 Changelog:
+8.7.2017:   Removed debug messages, release version 0.0.2
 7.7.2017:   Bugfixing: synchronizing scrolling in text widgets, removing empty line at the bottom
 
 Copyright (C) 2016 Stefan Braun
@@ -253,7 +254,7 @@ class DMS_Vars(object):
 class DMS_Value_Changer(tk.Tk):
 	def __init__(self, curr_dms):
 		tk.Tk.__init__(self)
-		self.title("DMS Value Changer v0.0.1")
+		self.title("DMS Value Changer v0.0.2")
 		self.resizable(0, 0)
 		self.dms_vars = DMS_Vars(curr_dms)
 
@@ -320,9 +321,9 @@ class _Button_Frame(tk.Frame):
 		# and put their metadata and values into our text areas
 		# FIXME: we have always two empty strings at the list end... How to remove them while not causing many exceptions in other code parts?!?
 		key_list = self._textarea_as_key_list(self.text_area_dict['key'])
-		if DEBUGGING:
-			print('text_area = ' + repr(self._textarea_as_key_list(self.text_area_dict['key'])))
-			print('key_list = ' + repr(key_list))
+		#if DEBUGGING:
+		#	print('text_area = ' + repr(self._textarea_as_key_list(self.text_area_dict['key'])))
+		#	print('key_list = ' + repr(key_list))
 		self.parent.dms_vars.read_from_dms(key_list)
 
 		# put content from DMS into text areas (we need to set them into editable state for doing this)

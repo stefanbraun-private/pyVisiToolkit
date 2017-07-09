@@ -4,6 +4,7 @@
 tools.PSC_file_selector.py
 
 Changelog:
+8.7.2017:   reduced debug messages in case of corrupted PCS file (no more printing of whole corrupted PSC file), release version 0.2.3
 7.7.2017:   improving robustness against corrupted PSC files (they raise UnicodeDecodeError)
 
 
@@ -38,7 +39,7 @@ import codecs
 import subprocess
 import misc.clipboard
 
-ROOTWINDOW_TITLE = u'PSC file selector v0.2.2'
+ROOTWINDOW_TITLE = u'PSC file selector v0.2.3'
 USAGE_HINT_TEXT = u'Usage hints: double-click = open in GE // right-click = context-menu // header-click = sorting columns'
 
 
@@ -118,7 +119,7 @@ class PscFile(object):
 				try:
 					self._whole_file = f.read()
 				except UnicodeDecodeError as ex:
-					my_print(u'Exception in "get_whole_file()": file "' + self._fullpath + u'" contains wrong characters: ' + repr(ex))
+					my_print(u'Exception "UnicodeDecodeError" in "get_whole_file()": file "' + self._fullpath + u'" contains wrong characters!')
 					my_print(u'=>ignoring this file...')
 					self._whole_file = u''
 				self._last_readtime = self._modification_time
