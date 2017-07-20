@@ -24,14 +24,11 @@ import argparse
 import time
 from datetime import datetime
 
-POLL_PAUSE_SECONDS = 1
 
 class Node(object):
 	def __init__(self, value, datatype_str):
 		self.value = value
 		self.datatype_str = datatype_str
-
-
 
 def get_dms_tree_as_dict(curr_dms, dms_node_str):
 	'''retrieves DMS tree with all datatypes and values'''
@@ -72,12 +69,13 @@ def print_with_timestamp(line_str):
 	print('\t'.join([time_str, line_str]))
 
 
-def main(dms_node_str):
+def main(dms_node_str, pause_secs, section_sep_str):
 	print('Starting "DMS tracer" for DMS node "' + str(dms_node_str) + '"...')
 	curr_dms = dms.dmspipe.Dmspipe()
 
 	if curr_dms:
 		print('DMS tracer is ready...')
+		print('\t(=>pause between polling is ' + str(pause_secs) + ' seconds)')
 		print('=>usage hint: press <CTRL> + "C" for cancelling')
 	else:
 		print('ERROR: "DMS tracer" needs a running DMS!')
@@ -98,6 +96,7 @@ def main(dms_node_str):
 			new_keys_set = set(new_keys_dict.keys())
 
 			if not first_run:
+				new_section = False
 				# check for deleted DMS keys
 				for dms_key in sorted(old_keys_set - new_keys_set):
 					old_node = old_keys_dict[dms_key]
@@ -105,6 +104,7 @@ def main(dms_node_str):
 					type_str = '[' + old_node.datatype_str + ']'
 					value_str = '[' + str(old_node.value) + ']'
 					print_with_timestamp('\t'.join([change_str, type_str, dms_key, value_str]))
+					new_section = True
 
 				# check for changed DMS keys
 				for dms_key in sorted(old_keys_set & new_keys_set):
@@ -118,6 +118,7 @@ def main(dms_node_str):
 							type_str = '[' + old_node.datatype_str + ']'
 						value_str = '[' + str(old_node.value) + ']=>[' + str(new_node.value) + ']'
 						print_with_timestamp('\t'.join([change_str, type_str, dms_key, value_str]))
+						new_section = True
 
 				# check for added DMS keys
 				for dms_key in sorted(new_keys_set - old_keys_set):
@@ -126,10 +127,16 @@ def main(dms_node_str):
 					type_str = '[' + new_node.datatype_str + ']'
 					value_str = '[' + str(new_node.value) + ']'
 					print_with_timestamp('\t'.join([change_str, type_str, dms_key, value_str]))
+					new_section = True
+
+				# print section separator if wanted (for better readability)
+				if new_section and section_sep_str != '':
+						print(section_sep_str)
+
 			else:
 				first_run = False
 
-			time.sleep(POLL_PAUSE_SECONDS)
+			time.sleep(pause_secs)
 			old_keys_dict = new_keys_dict
 	except KeyboardInterrupt:
 		pass
@@ -141,12 +148,23 @@ def main(dms_node_str):
 if __name__ == '__main__':
 	parser = argparse.ArgumentParser(description='DMS tracer of changed DMS keys.')
 
+	# using a flag for insertion of linebreaks
+	# help from https://stackoverflow.com/questions/8259001/python-argparse-command-line-flags-without-arguments
+	parser.add_argument('-l', '--linear', action='store_true', help='suppress additional newlines between differences (default is building sections for better readability)')
+
+	parser.add_argument('-p', '--pause', default=1.0, type=float, nargs='?', help='waiting time in seconds for next polling cycle (default is 1.0)')
+
 	# this positional argument is optional
 	# with help from http://stackoverflow.com/questions/4480075/argparse-optional-positional-arguments
 	parser.add_argument('DMS_NODE', default='BMO', nargs='?', help='DMS node and all subnodes to trace (e.g. MSR01:H01, default is BMO)')
 
 	args = parser.parse_args()
 
+	if not args.linear:
+		# better readability between different pollings
+		section_sep_str = '=' * 20
+	else:
+		section_sep_str = ''
 
-	status = main(dms_node_str=args.DMS_NODE)
+	status = main(dms_node_str=args.DMS_NODE, pause_secs=args.pause, section_sep_str=section_sep_str)
 	# sys.exit(status)
