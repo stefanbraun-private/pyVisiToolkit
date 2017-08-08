@@ -6,12 +6,16 @@ dms.dmswebsocket.py
 Copyright (C) 2017 Stefan Braun
 
 
-current state august 6th 2017:
+current state august 8th 2017:
 =>test with WebSocket library https://github.com/websocket-client/websocket-client
 (without using complicated huge frameworks)
-==>it seems that this library does only WebSocket communication,
-   but DMS needs first a HTTP/1.1 request with WebSocket connection upgrade/handshake... :-(
-==>CORRECTION: during tests the URI started with wss:// instead of ws://, perhaps without SSL it had worked...?
+==>this works well! :-)
+currently only cleartext WebSocket (URL "ws" instead of "wss"/SSL) is implemented
+
+
+Based on this documentation:
+https://github.com/stefanbraun-private/stefanbraun-private.github.io/tree/master/ProMoS_dev_docs
+
 
 
 This program is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, either version 2 of the License, or (at your option) any later version.
@@ -54,7 +58,7 @@ class _DMSRequest(_DMSFrame):
 	def __init__(self, whois, user):
 		self.whois = u'' + whois
 		self.user = u'' + user
-		self.tag = None
+		self.tag = None # we don't tag the whole request, since we tag all single commands inside request
 		# dict of lists, containing all pending commands
 		self._cmd_dict = {}
 		self._cmd_tags_list = []
@@ -168,9 +172,27 @@ class _DMSCmdGet(object):
 
 
 
-class _DMSCmdResponse(_DMSFrame):
+class _DMSCmdResponseFactoy(object):
+	""" parsing of incoming command response and create response object """
 	def __init__(self):
-		_DMSFrame.__init__(self)
+		pass
+
+	def get_response_obj(self, curr_dict):
+		resp_obj_list = []
+		if 'get' in curr_dict:
+			for item in curr_dict['get']:
+				curr_obj = _DMSCmdGetResponse(**item)
+				resp_obj_list.append(curr_obj)
+		return resp_obj_list
+
+
+class _DMSCmdGetResponse(object):
+	def __init__(self, **kwargs):
+		# set all keyword arguments as instance attribut
+		# help from https://stackoverflow.com/questions/8187082/how-can-you-set-class-attributes-from-variable-arguments-kwargs-in-python
+		self.__dict__.update(kwargs)
+
+
 
 
 class _MessageHandler(object):
@@ -187,7 +209,7 @@ class _MessageHandler(object):
 	def dp_get(self, path, **kwargs):
 		""" read datapoint value(s) """
 
-		req = _DMSRequest(whois=self._whois_str, user=self._user_str).addCmd(_DMSCmdGet(msghandler=self, path=path))
+		req = _DMSRequest(whois=self._whois_str, user=self._user_str).addCmd(_DMSCmdGet(msghandler=self, path=path, **kwargs))
 		self._send_frame(req)
 
 		responses = []
@@ -230,12 +252,15 @@ class _MessageHandler(object):
 				if u'tag' in get_resp:
 					curr_tag = get_resp[u'tag']
 					if curr_tag in self._pending_msg_dict:
-						print('\tidentified response to our request.')
-						self._pending_msg_dict[curr_tag] = payload_dict[u'get']
+						if DEBUGGING:
+							print('\tidentified response to our request.')
+						self._pending_msg_dict[curr_tag] = get_resp
 					else:
-						print('\tignoring unexpected response...')
+						if DEBUGGING:
+							print('\tignoring unexpected response...')
 				else:
-					print('\tignoring untagged response...')
+					if DEBUGGING:
+						print('\tignoring untagged response...')
 
 	def _send_frame(self, frame_obj):
 		# send whole request
@@ -249,7 +274,7 @@ class _MessageHandler(object):
 		# FIXME: can we implement this in a better way?
 		found = False
 		while not found:
-			time.sleep(0.1)
+			time.sleep(0.001)
 			if self._pending_msg_dict[tag]:
 				found = True
 		return self._pending_msg_dict.pop(tag)
@@ -281,6 +306,7 @@ class DMSClient(object):
 		                            on_close = self._cb_on_close)
 		# executing WebSocket eventloop in background
 		self._ws_thread = thread.start_new_thread(self._ws.run_forever, ())
+		# FIXME: how to return caller a non-reachable WebSocket server?
 		if DEBUGGING:
 			print("WebSocket connection will be established in background...")
 
@@ -314,7 +340,7 @@ class DMSClient(object):
 	def _busy_wait_until_ready(self):
 		# FIXME: is there a better way to do this?
 		while not self.ready_to_send:
-			time.sleep(0.1)
+			time.sleep(0.001)
 
 
 	def _send_message(self, msg):
@@ -355,7 +381,7 @@ class DMSClient(object):
 
 if __name__ == '__main__':
 
-	myClient = DMSClient(u'test', u'user',  dms_host_str='192.168.10.180')
+	myClient = DMSClient(u'test', u'user',  dms_host_str='192.168.10.175')
 	print('\n=>WebSocket connection runs now in background...')
 
 	# while True:
@@ -363,10 +389,32 @@ if __name__ == '__main__':
 	# 	print('sending TESTMSG...')
 	# 	myClient._send_message(TESTMSG)
 
-	print('\nTesting creation of Request command:')
-	print('"get":')
-	for x in range(5):
+	test_set = set([3])
+
+	if 1 in test_set:
+		print('\nTesting creation of Request command:')
+		print('"get":')
+		for x in range(3):
+			response = myClient.dp_get(path="System:Time")
+			print('response to out request: ' + repr(response))
+			print('*' * 20)
+
+	if 2 in test_set:
+		print('\n\nNow doing loadtest:')
+		global DEBUGGING
+		DEBUGGING = False
+		nof_tests = 10000
+		for x in xrange(nof_tests):
+			response = myClient.dp_get(path="System:Time")
+		print('We have done ' + str(nof_tests) + ' requests. :-) Does it still work?')
+		DEBUGGING = True
+		print('*' * 20)
 		response = myClient.dp_get(path="System:Time")
 		print('response to out request: ' + repr(response))
 		print('*' * 20)
+
+	if 3 in test_set:
+		print('\nNow testing query function:')
+		print('\twithout query: ' + repr(myClient.dp_get(path="")))
+		print('\twith query: ' + repr(myClient.dp_get(path="", regExPath=".*", maxDepth=1)))
 	print('\n=>quitting...')
