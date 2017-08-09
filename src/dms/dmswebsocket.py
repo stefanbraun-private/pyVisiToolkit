@@ -172,6 +172,34 @@ class _DMSCmdGet(object):
 
 
 
+
+class _DMSExtInfos(object):
+	""" optional extended infos about datapoint """
+	def __init__(self, **kwargs):
+		keys_tuple = (u'template', u'name', u'accType', u'unit', u'comment')
+		for key in keys_tuple:
+			if key in kwargs:
+				# adding instance attribut and removing keyword
+				val = kwargs.pop(key)
+				self.__dict__[key] = u'' + val
+		if kwargs:
+			print('Warning: parsing "extInfos" revealed these unknown fields: ' + repr(kwargs))
+
+
+
+# FIXME: how to implement initialisation?
+class _DMSHistData_compact(object):
+	""" optional history data in compact format """
+	def __init__(self, **kwargs):
+		pass
+
+# FIXME: how to implement initialisation?
+class _DMSHistData_detail(_DMSHistData_compact):
+	""" optional history data in detail format """
+	def __init__(self, **kwargs):
+		super(_DMSHistData_detail, self).__init(**kwargs)
+
+
 class _DMSCmdResponseFactoy(object):
 	""" parsing of incoming command response and create response object """
 	def __init__(self):
@@ -186,12 +214,67 @@ class _DMSCmdResponseFactoy(object):
 		return resp_obj_list
 
 
-class _DMSCmdGetResponse(object):
-	def __init__(self, **kwargs):
-		# set all keyword arguments as instance attribut
-		# help from https://stackoverflow.com/questions/8187082/how-can-you-set-class-attributes-from-variable-arguments-kwargs-in-python
-		self.__dict__.update(kwargs)
+class DMSCmdResponse(object):
+	""" all common response fields """
 
+	# string constants
+	CODE_OK = u'ok'
+	CODE_NOPERM = u'no perm'
+	CODE_NOTFOUND = u'not found'
+	CODE_ERROR = u'error'
+
+	def __init__(self, **kwargs):
+		# implicit parsing
+		val = None
+		for key in kwargs:
+			if key == u'code':
+				val = kwargs[key]
+				if not kwargs[key] in (DMSCmdResponse.CODE_OK,
+				               DMSCmdResponse.CODE_NOPERM,
+				               DMSCmdResponse.CODE_NOTFOUND,
+				               DMSCmdResponse.CODE_ERROR):
+					print('Warning while parsing DMS response: unknown value in "code"-field: ' + repr(val))
+
+
+
+
+
+class DMSCmdGetResponse(DMSCmdResponse):
+	def __init__(self, **kwargs):
+		# better idea: parsing all fields for implicit detection of protocol violations
+		# =>checking availability of field and remove it, then handle remaining fields by superclass
+		#
+		## set all keyword arguments as instance attribut
+		## help from https://stackoverflow.com/questions/8187082/how-can-you-set-class-attributes-from-variable-arguments-kwargs-in-python
+		#self.__dict__.update(kwargs)
+
+		# FIXME: can we implement this better readable?!?
+		if u'path' in kwargs:
+			self.path = u'' + kwargs.pop(key)
+		if u'value' in kwargs:
+			self.value = kwargs.pop(key)
+		if u'type' in kwargs:
+			self.type = kwargs.pop(key)
+			if not self.type in (u'int', u'double', u'string', u'bool', u'none'):
+				print('Warning while parsing DMS response: unknown value in "type"-field: ' + repr(self.type))
+		if u'hasChild' in kwargs:
+			self.hasChild = bool(kwargs.pop(key))
+		if u'stamp' in kwargs:
+			# FIXME: use DateTime object
+			self.stamp = u'' + kwargs.pop(key)
+		if u'extInfos' in kwargs:
+			self.extInfos = _DMSExtInfos(kwargs.pop(key))
+		if u'message' in kwargs:
+			self.message = u'' + kwargs.pop(key)
+		if u'histData' in kwargs:
+			# FIXME: should we store ONE histData object containing all trenddata, or a LIST of histData objects?
+			self.histData = kwargs.pop(key)
+		if u'tag' in kwargs:
+			# no need to hold message tag
+			del kwargs[key]
+
+		# init all common fields with our modified kwargs
+		super(DMSCmdGetResponse, self).__init__(**kwargs)
 
 
 
@@ -381,7 +464,7 @@ class DMSClient(object):
 
 if __name__ == '__main__':
 
-	myClient = DMSClient(u'test', u'user',  dms_host_str='192.168.10.175')
+	myClient = DMSClient(u'test', u'user',  dms_host_str='192.168.10.182')
 	print('\n=>WebSocket connection runs now in background...')
 
 	# while True:
