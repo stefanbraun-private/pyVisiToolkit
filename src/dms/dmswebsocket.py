@@ -33,6 +33,8 @@ import time
 import uuid
 import websocket
 import thread
+import collections
+import dateutil.parser, datetime
 
 
 TESTMSG = (u'{ "get": [ {"path":"System:Time"} ] }')
@@ -200,22 +202,13 @@ class _DMSHistData_detail(_DMSHistData_compact):
 		super(_DMSHistData_detail, self).__init(**kwargs)
 
 
-class _DMSCmdResponseFactoy(object):
-	""" parsing of incoming command response and create response object """
-	def __init__(self):
-		pass
-
-	def get_response_obj(self, curr_dict):
-		resp_obj_list = []
-		if 'get' in curr_dict:
-			for item in curr_dict['get']:
-				curr_obj = _DMSCmdGetResponse(**item)
-				resp_obj_list.append(curr_obj)
-		return resp_obj_list
-
-
 class DMSCmdResponse(object):
 	""" all common response fields """
+
+	# inherit from abstract class "Mapping" for getting dictionary-interface
+	# https://stackoverflow.com/questions/19775685/how-to-correctly-implement-the-mapping-protocol-in-python
+	# https://docs.python.org/2.7/library/collections.html#collections.MutableMapping
+	# (then the options are similar to Tkinter widgets: http://effbot.org/tkinterbook/tkinter-widget-configuration.htm )
 
 	# string constants
 	CODE_OK = u'ok'
@@ -223,59 +216,84 @@ class DMSCmdResponse(object):
 	CODE_NOTFOUND = u'not found'
 	CODE_ERROR = u'error'
 
+	# these fields are common for all responses
+	_fields = (u'code', )
+
 	def __init__(self, **kwargs):
-		# implicit parsing
-		val = None
-		for key in kwargs:
-			if key == u'code':
-				val = kwargs[key]
-				if not kwargs[key] in (DMSCmdResponse.CODE_OK,
-				               DMSCmdResponse.CODE_NOPERM,
-				               DMSCmdResponse.CODE_NOTFOUND,
-				               DMSCmdResponse.CODE_ERROR):
-					print('Warning while parsing DMS response: unknown value in "code"-field: ' + repr(val))
+		# this variable has to be declared in child class...
+		for field in DMSCmdResponse._fields:
+			try:
+				self._values_dict[field] = kwargs[field]
+			except KeyError:
+				# something went wrong, a mandatory field is missing... =>set error code
+				print('constructor of DMSCmdResponse(): ERROR: mandatory field "' + field + '" is missing in current response!')
+				self._values_dict[u'code'] = DMSCmdResponse.CODE_ERROR
 
 
+class DMSCmdGetResponse(DMSCmdResponse, collections.Mapping):
+	_fields = (u'path',
+	           u'value',
+	           u'type',
+	           u'hasChild',
+	           u'stamp',
+	           u'extInfos',
+	           u'message',
+	           u'histData',
+	           u'tag')
 
-
-
-class DMSCmdGetResponse(DMSCmdResponse):
 	def __init__(self, **kwargs):
-		# better idea: parsing all fields for implicit detection of protocol violations
-		# =>checking availability of field and remove it, then handle remaining fields by superclass
+		# better idea: do ducktyping without type checking,
+		# inherit from abstract class "Mapping" for getting dictionary-interface
+		# https://stackoverflow.com/questions/19775685/how-to-correctly-implement-the-mapping-protocol-in-python
+		# https://docs.python.org/2.7/library/collections.html#collections.MutableMapping
+		# (then the options are similar to Tkinter widgets: http://effbot.org/tkinterbook/tkinter-widget-configuration.htm )
+		#
 		#
 		## set all keyword arguments as instance attribut
 		## help from https://stackoverflow.com/questions/8187082/how-can-you-set-class-attributes-from-variable-arguments-kwargs-in-python
 		#self.__dict__.update(kwargs)
 
-		# FIXME: can we implement this better readable?!?
-		if u'path' in kwargs:
-			self.path = u'' + kwargs.pop(key)
-		if u'value' in kwargs:
-			self.value = kwargs.pop(key)
-		if u'type' in kwargs:
-			self.type = kwargs.pop(key)
-			if not self.type in (u'int', u'double', u'string', u'bool', u'none'):
-				print('Warning while parsing DMS response: unknown value in "type"-field: ' + repr(self.type))
-		if u'hasChild' in kwargs:
-			self.hasChild = bool(kwargs.pop(key))
-		if u'stamp' in kwargs:
-			# FIXME: use DateTime object
-			self.stamp = u'' + kwargs.pop(key)
-		if u'extInfos' in kwargs:
-			self.extInfos = _DMSExtInfos(kwargs.pop(key))
-		if u'message' in kwargs:
-			self.message = u'' + kwargs.pop(key)
-		if u'histData' in kwargs:
-			# FIXME: should we store ONE histData object containing all trenddata, or a LIST of histData objects?
-			self.histData = kwargs.pop(key)
-		if u'tag' in kwargs:
-			# no need to hold message tag
-			del kwargs[key]
+		self._values_dict = {}
 
-		# init all common fields with our modified kwargs
+		for field in DMSCmdResponse._fields:
+			try:
+				if field == u'stamp':
+					# timestamps are ISO 8601 formatted (or "null" after DMS restart or on nodes with type "none")
+					# https://stackoverflow.com/questions/969285/how-do-i-translate-a-iso-8601-datetime-string-into-a-python-datetime-object
+					try:
+						dateutil.parser.parse(kwargs[field])
+					except ValueError:
+						self._values_dict[field] = None
+				elif field == u'extInfos':
+					self._values_dict[field] = _DMSExtInfos(kwargs[field])
+				elif field == u'histData':
+					# FIXME: should we store ONE histData object containing all trenddata, or a LIST of histData objects?
+					# FIXME: implement histData class
+					self._values_dict[field] = kwargs[field]
+				else:
+					# default: no special treatment
+					self._values_dict[field] = kwargs[field]
+			except KeyError:
+				# argument was not in response =>setting default value
+				self._values_dict[field] = None
+
+		# init all common fields
 		super(DMSCmdGetResponse, self).__init__(**kwargs)
 
+
+	def __getitem__(self, key):
+		return self._values_dict[key]
+
+	def __iter__(self):
+		return iter(self._values_dict)
+
+	def __len__(self):
+		return len(self._values_dict)
+
+
+	def __repr__(self):
+		""" developer representation of this object """
+		return repr(self._values_dict)
 
 
 class _MessageHandler(object):
@@ -285,9 +303,21 @@ class _MessageHandler(object):
 		self._whois_str = whois_str
 		self._user_str = user_str
 
-		# dict for pending messages (key: cmd-tag, value: message as dict)
+		# dict for pending responses (key: cmd-tag, value: list of DMSCmdResponse-objects)
 		# =>None means request is sent, but answer is not yet here
-		self._pending_msg_dict = {}
+		self._pending_response_dict = {}
+
+		# object for assembling response lists
+		# (when one "get" command produces more than one response)
+		class Current_response(object):
+			def __init__(self):
+				self.msg_tag = u''
+				self.resp_list = []
+			def clear(self):
+				self.__init__()
+		self._curr_response = Current_response()
+
+
 
 	def dp_get(self, path, **kwargs):
 		""" read datapoint value(s) """
@@ -295,15 +325,14 @@ class _MessageHandler(object):
 		req = _DMSRequest(whois=self._whois_str, user=self._user_str).addCmd(_DMSCmdGet(msghandler=self, path=path, **kwargs))
 		self._send_frame(req)
 
-		responses = []
-		for tag in req.get_tags():
-			responses.append(self._busy_wait_for_response(tag))
-
-		# FIXME: should we implement handling of more than one "get" request per frame?
-		if len(responses) == 1:
-			return responses[0]
-		else:
-			return responses
+		try:
+			tag = req.get_tags()[0]
+			return self._busy_wait_for_response(tag)
+		except IndexError:
+			# something went wrong...
+			if DEBUGGING:
+				print('error in dp_get(): len(req.get_tags())=' + str(len(req.get_tags())) + ', too much or too few responses? sending more than one command per request is not implemented!')
+			raise Exception('Please report this bug of pyVisiToolkit!')
 
 	def dp_set(self):
 		""" write datapoint value(s) """
@@ -328,22 +357,50 @@ class _MessageHandler(object):
 	def handle(self, msg):
 		payload_dict = json.loads(msg.decode('utf8'))
 
-		# message handler
-		if u'get' in payload_dict:
-			# handling responses to "get"
-			for get_resp in payload_dict[u'get']:
-				if u'tag' in get_resp:
-					curr_tag = get_resp[u'tag']
-					if curr_tag in self._pending_msg_dict:
-						if DEBUGGING:
-							print('\tidentified response to our request.')
-						self._pending_msg_dict[curr_tag] = get_resp
+		try:
+			# message handler
+			if u'get' in payload_dict:
+				# handling responses to "get"
+				for get_response in payload_dict[u'get']:
+					if u'tag' in get_response:
+						curr_tag = get_response[u'tag']
+						if len(payload_dict[u'get']) == 1:
+							# only one response to this request =>bypass listcreation of responses
+							# =>save response object
+							if curr_tag in self._pending_response_dict:
+								if DEBUGGING:
+									print('\tidentified one response to our request.')
+								resp_obj = DMSCmdGetResponse(**get_response)
+								self._pending_response_dict[curr_tag] = [resp_obj]
+							else:
+								if DEBUGGING:
+									print('\tignoring unexpected response...')
+							# reset response list
+							self._curr_response.clear()
+						else:
+							# processing array of responses
+							if curr_tag == self._curr_response.msg_tag:
+								# appending to current list
+								self._curr_response.resp_list.append(DMSCmdGetResponse(**get_response))
+							else:
+								if self._curr_response.msg_tag and self._curr_response.resp_list:
+									# need to save last responses
+									if curr_tag in self._pending_response_dict:
+										if DEBUGGING:
+											print('\tidentified multiple responses to our request.')
+										print('FOO')
+										self._pending_response_dict[curr_tag] = self._curr_response.resp_list
+									else:
+										if DEBUGGING:
+											print('\tignoring unexpected response...')
+								# begin of new response list
+								self._curr_response.msg_tag = curr_tag
+								self._curr_response.resp_list = [DMSCmdGetResponse(**get_response)]
 					else:
 						if DEBUGGING:
-							print('\tignoring unexpected response...')
-				else:
-					if DEBUGGING:
-						print('\tignoring untagged response...')
+							print('\tignoring untagged response...')
+		except Exception as ex:
+			print("exception in _MessageHandler.handle(): " + repr(ex))
 
 	def _send_frame(self, frame_obj):
 		# send whole request
@@ -358,9 +415,9 @@ class _MessageHandler(object):
 		found = False
 		while not found:
 			time.sleep(0.001)
-			if self._pending_msg_dict[tag]:
+			if self._pending_response_dict[tag]:
 				found = True
-		return self._pending_msg_dict.pop(tag)
+		return self._pending_response_dict.pop(tag)
 
 
 	def generate_tag(self):
@@ -368,7 +425,7 @@ class _MessageHandler(object):
 		# (see https://docs.python.org/2/library/uuid.html )
 		curr_tag = str(uuid.uuid4())
 
-		self._pending_msg_dict[curr_tag] = None
+		self._pending_response_dict[curr_tag] = None
 		return curr_tag
 
 
@@ -464,7 +521,7 @@ class DMSClient(object):
 
 if __name__ == '__main__':
 
-	myClient = DMSClient(u'test', u'user',  dms_host_str='192.168.10.182')
+	myClient = DMSClient(u'test', u'user') #,  dms_host_str='192.168.10.173')
 	print('\n=>WebSocket connection runs now in background...')
 
 	# while True:
@@ -472,19 +529,18 @@ if __name__ == '__main__':
 	# 	print('sending TESTMSG...')
 	# 	myClient._send_message(TESTMSG)
 
-	test_set = set([3])
+	test_set = set([1])
 
 	if 1 in test_set:
 		print('\nTesting creation of Request command:')
 		print('"get":')
 		for x in range(3):
 			response = myClient.dp_get(path="System:Time")
-			print('response to out request: ' + repr(response))
+			print('response to our request: ' + repr(response))
 			print('*' * 20)
 
 	if 2 in test_set:
 		print('\n\nNow doing loadtest:')
-		global DEBUGGING
 		DEBUGGING = False
 		nof_tests = 10000
 		for x in xrange(nof_tests):
@@ -493,7 +549,7 @@ if __name__ == '__main__':
 		DEBUGGING = True
 		print('*' * 20)
 		response = myClient.dp_get(path="System:Time")
-		print('response to out request: ' + repr(response))
+		print('response to our request: ' + repr(response))
 		print('*' * 20)
 
 	if 3 in test_set:
