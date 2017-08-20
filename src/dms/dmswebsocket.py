@@ -175,34 +175,100 @@ class _DMSCmdGet(object):
 
 
 
-class _DMSExtInfos(object):
+class ExtInfos(collections.Mapping):
 	""" optional extended infos about datapoint """
+	# inherit from abstract "Mapping" for getting dictionary-API
+
+	_fields = (u'template',
+	           u'name',
+	           u'accType',
+	           u'unit',
+	           u'comment')
 	def __init__(self, **kwargs):
-		keys_tuple = (u'template', u'name', u'accType', u'unit', u'comment')
-		for key in keys_tuple:
-			if key in kwargs:
-				# adding instance attribut and removing keyword
-				val = kwargs.pop(key)
-				self.__dict__[key] = u'' + val
-		if kwargs:
-			print('Warning: parsing "extInfos" revealed these unknown fields: ' + repr(kwargs))
+		self._values_dict = {}
+
+		for field in ExtInfos._fields:
+			try:
+				# all fields are strings.
+				# default: no special treatment
+				self._values_dict[field] = kwargs[field]
+			except KeyError:
+				# argument was not in response =>setting default value
+				self._values_dict[field] = None
+
+		def __getitem__(self, key):
+			return self._values_dict[key]
+
+		def __iter__(self):
+			return iter(self._values_dict)
+
+		def __len__(self):
+			return len(self._values_dict)
+
+		def __repr__(self):
+			""" developer representation of this object """
+			return repr(self._values_dict)
 
 
+class HistData_detail(collections.Sequence):
+	""" optional history data in detailed format """
+	# implementing abstract class "Sequence" for getting list-like object
+	# https://docs.python.org/2/library/collections.html#collections.Sequence
+	_fields = (u'stamp',
+	           u'value',
+	           u'state',
+	           u'rec')
 
-# FIXME: how to implement initialisation?
-class _DMSHistData_compact(object):
+	def __init__(self, histobj_list):
+		# list of dictionaries with _fields as keys
+		self._values_list = []
+
+		for histobj in histobj_list:
+			curr_dict = {}
+			for field in HistData_detail._fields:
+				if field == u'stamp':
+					# timestamps are ISO 8601 formatted (or "null" after DMS restart or on nodes with type "none")
+					# https://stackoverflow.com/questions/969285/how-do-i-translate-a-iso-8601-datetime-string-into-a-python-datetime-object
+					try:
+						curr_dict[field] = dateutil.parser.parse(histobj[field])
+					except:
+						# something went wrong, conversion into a datetime.datetime() object isn't possible
+						print('constructor of HistData_detail(): ERROR: timestamp in current response could not get parsed as valid datetime.datetime() object!')
+						curr_dict[field] = None
+				else:
+					# other fields are number or string, currently no special treatment
+					try:
+						curr_dict[field] = histobj[field]
+					except KeyError:
+						# something went wrong, a mandatory field is missing...
+						print('constructor of HistData_detail(): ERROR: mandatory field "' + field + '" is missing in current response!')
+						# argument was not in response =>setting default value
+						curr_dict[field] = None
+			# save current dict, begin a new one
+			self._values_list.append(curr_dict)
+			curr_dict = {}
+
+		def __getitem__(self, idx):
+			return self._values_list[idx]
+
+		def __len__(self):
+			return len(self._values_list)
+
+		def __repr__(self):
+			""" developer representation of this object """
+			return u'HistData_detail(' + repr(self._values_list) + u')'
+
+		def __str__(self):
+			return u'' + repr(self._values_list)
+
+
+class HistData_compact(collections.Sequence):
 	""" optional history data in compact format """
 	def __init__(self, **kwargs):
-		pass
-
-# FIXME: how to implement initialisation?
-class _DMSHistData_detail(_DMSHistData_compact):
-	""" optional history data in detail format """
-	def __init__(self, **kwargs):
-		super(_DMSHistData_detail, self).__init(**kwargs)
+		return NotImplemented('FIXME: how to implement class HistData_compact(collections.Sequence)?')
 
 
-class DMSCmdResponse(object):
+class CmdResponse(object):
 	""" all common response fields """
 
 	# inherit from abstract class "Mapping" for getting dictionary-interface
@@ -221,16 +287,16 @@ class DMSCmdResponse(object):
 
 	def __init__(self, **kwargs):
 		# this variable has to be declared in child class...
-		for field in DMSCmdResponse._fields:
+		for field in CmdResponse._fields:
 			try:
 				self._values_dict[field] = kwargs[field]
 			except KeyError:
 				# something went wrong, a mandatory field is missing... =>set error code
-				print('constructor of DMSCmdResponse(): ERROR: mandatory field "' + field + '" is missing in current response!')
-				self._values_dict[u'code'] = DMSCmdResponse.CODE_ERROR
+				print('constructor of CmdResponse(): ERROR: mandatory field "' + field + '" is missing in current response!')
+				self._values_dict[u'code'] = CmdResponse.CODE_ERROR
 
 
-class DMSCmdGetResponse(DMSCmdResponse, collections.Mapping):
+class CmdGetResponse(CmdResponse, collections.Mapping):
 	_fields = (u'path',
 	           u'value',
 	           u'type',
@@ -255,17 +321,17 @@ class DMSCmdGetResponse(DMSCmdResponse, collections.Mapping):
 
 		self._values_dict = {}
 
-		for field in DMSCmdResponse._fields:
+		for field in CmdGetResponse._fields:
 			try:
 				if field == u'stamp':
 					# timestamps are ISO 8601 formatted (or "null" after DMS restart or on nodes with type "none")
 					# https://stackoverflow.com/questions/969285/how-do-i-translate-a-iso-8601-datetime-string-into-a-python-datetime-object
 					try:
-						dateutil.parser.parse(kwargs[field])
-					except ValueError:
+						self._values_dict[field] = dateutil.parser.parse(kwargs[field])
+					except:
 						self._values_dict[field] = None
 				elif field == u'extInfos':
-					self._values_dict[field] = _DMSExtInfos(kwargs[field])
+					self._values_dict[field] = ExtInfos(kwargs[field])
 				elif field == u'histData':
 					# FIXME: should we store ONE histData object containing all trenddata, or a LIST of histData objects?
 					# FIXME: implement histData class
@@ -278,7 +344,7 @@ class DMSCmdGetResponse(DMSCmdResponse, collections.Mapping):
 				self._values_dict[field] = None
 
 		# init all common fields
-		super(DMSCmdGetResponse, self).__init__(**kwargs)
+		super(CmdGetResponse, self).__init__(**kwargs)
 
 
 	def __getitem__(self, key):
@@ -290,9 +356,11 @@ class DMSCmdGetResponse(DMSCmdResponse, collections.Mapping):
 	def __len__(self):
 		return len(self._values_dict)
 
-
 	def __repr__(self):
 		""" developer representation of this object """
+		return u'CmdGetResponse(' + repr(self._values_dict) + u')'
+
+	def __str__(self):
 		return repr(self._values_dict)
 
 
@@ -303,7 +371,7 @@ class _MessageHandler(object):
 		self._whois_str = whois_str
 		self._user_str = user_str
 
-		# dict for pending responses (key: cmd-tag, value: list of DMSCmdResponse-objects)
+		# dict for pending responses (key: cmd-tag, value: list of CmdResponse-objects)
 		# =>None means request is sent, but answer is not yet here
 		self._pending_response_dict = {}
 
@@ -370,7 +438,7 @@ class _MessageHandler(object):
 							if curr_tag in self._pending_response_dict:
 								if DEBUGGING:
 									print('\tidentified one response to our request.')
-								resp_obj = DMSCmdGetResponse(**get_response)
+								resp_obj = CmdGetResponse(**get_response)
 								self._pending_response_dict[curr_tag] = [resp_obj]
 							else:
 								if DEBUGGING:
@@ -381,7 +449,7 @@ class _MessageHandler(object):
 							# processing array of responses
 							if curr_tag == self._curr_response.msg_tag:
 								# appending to current list
-								self._curr_response.resp_list.append(DMSCmdGetResponse(**get_response))
+								self._curr_response.resp_list.append(CmdGetResponse(**get_response))
 							else:
 								if self._curr_response.msg_tag and self._curr_response.resp_list:
 									# need to save last responses
@@ -395,7 +463,7 @@ class _MessageHandler(object):
 											print('\tignoring unexpected response...')
 								# begin of new response list
 								self._curr_response.msg_tag = curr_tag
-								self._curr_response.resp_list = [DMSCmdGetResponse(**get_response)]
+								self._curr_response.resp_list = [CmdGetResponse(**get_response)]
 					else:
 						if DEBUGGING:
 							print('\tignoring untagged response...')
