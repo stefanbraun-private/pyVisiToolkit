@@ -136,10 +136,13 @@ class _DMSCmdGet(object):
 
 			# parsing "histData" object
 			val = None
-			if key == u'start':
-				val = u'' + kwargs[key]
-			if key == u'end':
-				val = u'' + kwargs[key]
+			if key == u'start' or key == u'end':
+				# convert datetime.datetime object to ISO 8601 format
+				try:
+					val = u'' + kwargs[key].isoformat()
+				except AttributeError:
+					# now we assume it's already a string
+					val = u'' + kwargs[key]
 			if key == u'interval':
 				val = int(kwargs[key])
 			if key == u'format':
@@ -207,7 +210,10 @@ class ExtInfos(collections.Mapping):
 
 		def __repr__(self):
 			""" developer representation of this object """
-			return repr(self._values_dict)
+			return u'ExtInfos(' + repr(self._values_dict) + u')'
+
+		def __str__(self):
+			return u'' + str(self._values_dict)
 
 
 class HistData_detail(collections.Sequence):
@@ -220,7 +226,7 @@ class HistData_detail(collections.Sequence):
 	           u'rec')
 
 	def __init__(self, histobj_list):
-		# list of dictionaries with _fields as keys
+		# internal storage: list of dictionaries with _fields as keys
 		self._values_list = []
 
 		for histobj in histobj_list:
@@ -231,7 +237,7 @@ class HistData_detail(collections.Sequence):
 					# https://stackoverflow.com/questions/969285/how-do-i-translate-a-iso-8601-datetime-string-into-a-python-datetime-object
 					try:
 						curr_dict[field] = dateutil.parser.parse(histobj[field])
-					except:
+					except ValueError:
 						# something went wrong, conversion into a datetime.datetime() object isn't possible
 						print('constructor of HistData_detail(): ERROR: timestamp in current response could not get parsed as valid datetime.datetime() object!')
 						curr_dict[field] = None
@@ -248,24 +254,59 @@ class HistData_detail(collections.Sequence):
 			self._values_list.append(curr_dict)
 			curr_dict = {}
 
-		def __getitem__(self, idx):
-			return self._values_list[idx]
 
-		def __len__(self):
-			return len(self._values_list)
+	def __getitem__(self, idx):
+		return self._values_list[idx]
 
-		def __repr__(self):
-			""" developer representation of this object """
-			return u'HistData_detail(' + repr(self._values_list) + u')'
+	def __len__(self):
+		return len(self._values_list)
 
-		def __str__(self):
-			return u'' + repr(self._values_list)
+	def __repr__(self):
+		""" developer representation of this object """
+		return u'HistData_detail(' + repr(self._values_list) + u')'
+
+	def __str__(self):
+		return u'' + str(self._values_list)
 
 
 class HistData_compact(collections.Sequence):
 	""" optional history data in compact format """
-	def __init__(self, **kwargs):
-		return NotImplemented('FIXME: how to implement class HistData_compact(collections.Sequence)?')
+	# implementing abstract class "Sequence" for getting list-like object
+	# https://docs.python.org/2/library/collections.html#collections.Sequence
+	def __init__(self, histobj_list):
+		# internal storage: list of tuples (timestamp, value)
+		self._values_list = []
+
+		for histobj in histobj_list:
+			# info: dictionary items() method returns a list of (key, value) tuples...
+			stamp_str, value = histobj.items()[0]
+
+			# timestamps are ISO 8601 formatted (or "null" after DMS restart or on nodes with type "none")
+			# https://stackoverflow.com/questions/969285/how-do-i-translate-a-iso-8601-datetime-string-into-a-python-datetime-object
+			try:
+				stamp = dateutil.parser.parse(stamp_str)
+			except ValueError:
+				# something went wrong, conversion into a datetime.datetime() object isn't possible
+				print(
+				'constructor of HistData_compact(): ERROR: timestamp in current response could not get parsed as valid datetime.datetime() object!')
+				stamp = None
+
+			curr_tuple = (stamp, value)
+			self._values_list.append(curr_tuple)
+
+	def __getitem__(self, idx):
+		return self._values_list[idx]
+
+	def __len__(self):
+		return len(self._values_list)
+
+	def __repr__(self):
+		""" developer representation of this object """
+		return u'HistData_compact(' + repr(self._values_list) + u')'
+
+	def __str__(self):
+		return u'' + str(self._values_list)
+
 
 
 class CmdResponse(object):
@@ -333,14 +374,26 @@ class CmdGetResponse(CmdResponse, collections.Mapping):
 				elif field == u'extInfos':
 					self._values_dict[field] = ExtInfos(kwargs[field])
 				elif field == u'histData':
-					# FIXME: should we store ONE histData object containing all trenddata, or a LIST of histData objects?
-					# FIXME: implement histData class
-					self._values_dict[field] = kwargs[field]
+					if kwargs[field]:
+						# parse response as "detail" or "compact" format
+						# according to documentation: default is "compact"
+						# =>checking first JSON-object if it contains "stamp" for choosing right parsing
+						histData_list = kwargs[field]
+						if not u'stamp' in histData_list[0]:
+							# assuming "compact" format
+							self._values_dict[field] = HistData_compact(kwargs[field])
+						else:
+							# assuming "detail" format
+							self._values_dict[field] = HistData_detail(kwargs[field])
+					else:
+						# histData is an empty list, we have no trenddata...
+						self._values_dict[field] = []
 				else:
 					# default: no special treatment
 					self._values_dict[field] = kwargs[field]
 			except KeyError:
 				# argument was not in response =>setting default value
+				print('\tDEBUG: CmdGetResponse constructor: field "' + field + '" is not in response.')
 				self._values_dict[field] = None
 
 		# init all common fields
@@ -361,7 +414,7 @@ class CmdGetResponse(CmdResponse, collections.Mapping):
 		return u'CmdGetResponse(' + repr(self._values_dict) + u')'
 
 	def __str__(self):
-		return repr(self._values_dict)
+		return u'' + str(self._values_dict)
 
 
 class _MessageHandler(object):
@@ -456,7 +509,6 @@ class _MessageHandler(object):
 									if curr_tag in self._pending_response_dict:
 										if DEBUGGING:
 											print('\tidentified multiple responses to our request.')
-										print('FOO')
 										self._pending_response_dict[curr_tag] = self._curr_response.resp_list
 									else:
 										if DEBUGGING:
@@ -597,7 +649,7 @@ if __name__ == '__main__':
 	# 	print('sending TESTMSG...')
 	# 	myClient._send_message(TESTMSG)
 
-	test_set = set([1])
+	test_set = set([4])
 
 	if 1 in test_set:
 		print('\nTesting creation of Request command:')
@@ -624,4 +676,14 @@ if __name__ == '__main__':
 		print('\nNow testing query function:')
 		print('\twithout query: ' + repr(myClient.dp_get(path="")))
 		print('\twith query: ' + repr(myClient.dp_get(path="", regExPath=".*", maxDepth=1)))
-	print('\n=>quitting...')
+
+	if 4 in test_set:
+		print('\nTesting retrieving HistData:')
+		response = myClient.dp_get(path="MSR01:Ala101:Output_Lampe",
+		                           start="2017-08-22T12:38:50.486000+02:00",
+		                           end="2017-08-23T12:38:50.486000+02:00",
+		                           format="compact",
+		                           interval=0,
+		                           showExtInfos=True,
+		                           maxDepth=0)
+		print('response: ' + repr(response))
