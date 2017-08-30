@@ -39,6 +39,8 @@ import dateutil.parser, datetime
 
 TESTMSG = (u'{ "get": [ {"path":"System:Time"} ] }')
 
+# duration of one time.sleep() in busy-waiting-loops
+TIMEOUT_TIMEBASE = 0.001
 
 # according "ProMoS DMS JSON Data Exchange":
 DMS_PORT = 9020             # cleartext HTTP or WebSocket
@@ -227,6 +229,57 @@ class _DMSCmdSet(object):
 	def get_type(self):
 		return _DMSCmdSet.CMD_TYPE
 
+
+class _DMSCmdRen(object):
+	""" one unique "Rename" request, parsed from **kwargs """
+
+	CMD_TYPE = u'rename'
+
+	def __init__(self, msghandler, path, newPath, **kwargs):
+		# kwargs are not used. we keep them for future extensions
+		# parsing of kwargs: help from https://stackoverflow.com/questions/5624912/kwargs-parsing-best-practice
+		# =>since all fields in "get" object and all it's subobjects are unique, we could handle them in the same loop
+		self.path = u'' + path
+		self.newPath = u'' + newPath
+		self.tag = msghandler.generate_tag()
+
+	def as_dict(self):
+		curr_dict = {}
+		curr_dict[u'path'] = self.path
+		curr_dict[u'newPath'] = self.newPath
+		curr_dict[u'tag'] = self.tag
+		return curr_dict
+
+	def get_type(self):
+		return _DMSCmdRen.CMD_TYPE
+
+
+class _DMSCmdDel(object):
+	""" one unique "Delete" request, parsed from **kwargs """
+
+	CMD_TYPE = u'delete'
+
+	def __init__(self, msghandler, path, recursive=None, **kwargs):
+		# kwargs are not used. we keep them for future extensions
+		# parsing of kwargs: help from https://stackoverflow.com/questions/5624912/kwargs-parsing-best-practice
+		# =>since all fields in "get" object and all it's subobjects are unique, we could handle them in the same loop
+		self.path = u'' + path
+
+		# flag "recursive" is optional, default in DMS is False.
+		# Because this is a possible dangerous command we allow explicit sending of False over the wire!
+		self.recursive = recursive
+		self.tag = msghandler.generate_tag()
+
+	def as_dict(self):
+		curr_dict = {}
+		curr_dict[u'path'] = self.path
+		if self.recursive != None:
+			curr_dict[u'recursive'] = bool(self.recursive)
+		curr_dict[u'tag'] = self.tag
+		return curr_dict
+
+	def get_type(self):
+		return _DMSCmdDel.CMD_TYPE
 
 
 
@@ -530,6 +583,104 @@ class CmdSetResponse(CmdResponse, collections.Mapping):
 		return u'' + str(self._values_dict)
 
 
+class CmdRenResponse(CmdResponse, collections.Mapping):
+	_fields = (u'path',
+	           u'newPath',
+	           u'message',
+	           u'tag')
+
+	def __init__(self, **kwargs):
+		# better idea: do ducktyping without type checking,
+		# inherit from abstract class "Mapping" for getting dictionary-interface
+		# https://stackoverflow.com/questions/19775685/how-to-correctly-implement-the-mapping-protocol-in-python
+		# https://docs.python.org/2.7/library/collections.html#collections.MutableMapping
+		# (then the options are similar to Tkinter widgets: http://effbot.org/tkinterbook/tkinter-widget-configuration.htm )
+		#
+		#
+		## set all keyword arguments as instance attribut
+		## help from https://stackoverflow.com/questions/8187082/how-can-you-set-class-attributes-from-variable-arguments-kwargs-in-python
+		#self.__dict__.update(kwargs)
+
+		self._values_dict = {}
+
+		for field in CmdRenResponse._fields:
+			try:
+				# default: no special treatment
+				self._values_dict[field] = kwargs[field]
+			except KeyError:
+				# argument was not in response =>setting default value
+				print('\tDEBUG: CmdRenResponse constructor: field "' + field + '" is not in response.')
+				self._values_dict[field] = None
+
+		# init all common fields
+		super(CmdRenResponse, self).__init__(**kwargs)
+
+
+	def __getitem__(self, key):
+		return self._values_dict[key]
+
+	def __iter__(self):
+		return iter(self._values_dict)
+
+	def __len__(self):
+		return len(self._values_dict)
+
+	def __repr__(self):
+		""" developer representation of this object """
+		return u'CmdRenResponse(' + repr(self._values_dict) + u')'
+
+	def __str__(self):
+		return u'' + str(self._values_dict)
+
+
+class CmdDelResponse(CmdResponse, collections.Mapping):
+	_fields = (u'path',
+	           u'message',
+	           u'tag')
+
+	def __init__(self, **kwargs):
+		# better idea: do ducktyping without type checking,
+		# inherit from abstract class "Mapping" for getting dictionary-interface
+		# https://stackoverflow.com/questions/19775685/how-to-correctly-implement-the-mapping-protocol-in-python
+		# https://docs.python.org/2.7/library/collections.html#collections.MutableMapping
+		# (then the options are similar to Tkinter widgets: http://effbot.org/tkinterbook/tkinter-widget-configuration.htm )
+		#
+		#
+		## set all keyword arguments as instance attribut
+		## help from https://stackoverflow.com/questions/8187082/how-can-you-set-class-attributes-from-variable-arguments-kwargs-in-python
+		#self.__dict__.update(kwargs)
+
+		self._values_dict = {}
+
+		for field in CmdDelResponse._fields:
+			try:
+				# default: no special treatment
+				self._values_dict[field] = kwargs[field]
+			except KeyError:
+				# argument was not in response =>setting default value
+				print('\tDEBUG: CmdDelResponse constructor: field "' + field + '" is not in response.')
+				self._values_dict[field] = None
+
+		# init all common fields
+		super(CmdDelResponse, self).__init__(**kwargs)
+
+
+	def __getitem__(self, key):
+		return self._values_dict[key]
+
+	def __iter__(self):
+		return iter(self._values_dict)
+
+	def __len__(self):
+		return len(self._values_dict)
+
+	def __repr__(self):
+		""" developer representation of this object """
+		return u'CmdDelResponse(' + repr(self._values_dict) + u')'
+
+	def __str__(self):
+		return u'' + str(self._values_dict)
+
 
 
 class _MessageHandler(object):
@@ -573,6 +724,10 @@ class _MessageHandler(object):
 
 	def dp_set(self, path, value, timeout=10000, **kwargs):
 		""" write datapoint value(s) """
+		# Remarks: datatype in DMS is taken from datatype of "value" (field "type" is optional)
+		# Remarks: datatype STR: 80 chars could be serialized by DMS into Promos.dms file for permament storage.
+		#                        =>transmission of 64kByte text is possible (total size of JSON request),
+		#                          this text is volatile in RAM of DMS.
 
 		req = _DMSRequest(whois=self._whois_str, user=self._user_str).addCmd(
 			_DMSCmdSet(msghandler=self, path=path, value=value, **kwargs))
@@ -588,19 +743,45 @@ class _MessageHandler(object):
 			raise Exception('Please report this bug of pyVisiToolkit!')
 
 
-	def dp_del(self):
+	def dp_del(self, path, recursive, timeout=10000, **kwargs):
 		""" delete datapoint(s) """
-		pass
 
-	def dp_ren(self):
+		req = _DMSRequest(whois=self._whois_str, user=self._user_str).addCmd(
+			_DMSCmdDel(msghandler=self, path=path, recursive=recursive, **kwargs))
+		self._send_frame(req)
+
+		try:
+			tag = req.get_tags()[0]
+			return self._busy_wait_for_response(tag, timeout)
+		except IndexError:
+			# something went wrong...
+			if DEBUGGING:
+				print('error in dp_del(): len(req.get_tags())=' + str(len(req.get_tags())) + ', too much or too few responses? sending more than one command per request is not implemented!')
+			raise Exception('Please report this bug of pyVisiToolkit!')
+
+
+	def dp_ren(self, path, newPath, timeout=10000, **kwargs):
 		""" rename datapoint(s) """
-		pass
 
-	def dp_sub(self):
+		req = _DMSRequest(whois=self._whois_str, user=self._user_str).addCmd(
+			_DMSCmdRen(msghandler=self, path=path, newPath=newPath, **kwargs))
+		self._send_frame(req)
+
+		try:
+			tag = req.get_tags()[0]
+			return self._busy_wait_for_response(tag, timeout)
+		except IndexError:
+			# something went wrong...
+			if DEBUGGING:
+				print('error in dp_ren(): len(req.get_tags())=' + str(len(req.get_tags())) + ', too much or too few responses? sending more than one command per request is not implemented!')
+			raise Exception('Please report this bug of pyVisiToolkit!')
+
+
+	def dp_sub(self, path, timeout=10000, **kwargs):
 		""" subscribe monitoring of datapoints(s) """
 		pass
 
-	def dp_unsub(self):
+	def dp_unsub(self, path, timeout=10000, **kwargs):
 		""" unsubscribe monitoring of datapoint(s) """
 		pass
 
@@ -609,8 +790,10 @@ class _MessageHandler(object):
 
 		try:
 			# message handler
-			for resp_type, resp_cls in [(u'get', CmdGetResponse),
-			                            (u'set', CmdSetResponse)]:
+			for resp_type, resp_cls in [(u'get',    CmdGetResponse),
+			                            (u'set',    CmdSetResponse),
+			                            (u'rename', CmdRenResponse),
+			                            (u'delete', CmdDelResponse)]:
 				if resp_type in payload_dict:
 					# handling responses to command
 
@@ -664,7 +847,7 @@ class _MessageHandler(object):
 		found = False
 		loops = 0
 		while not found and loops <= timeout:
-			time.sleep(0.001)
+			time.sleep(TIMEOUT_TIMEBASE)
 			loops = loops + 1
 			if self._pending_response_dict[tag]:
 				found = True
@@ -710,13 +893,13 @@ class DMSClient(object):
 		""" write datapoint value(s) """
 		return self._msghandler.dp_set(path, **kwargs)
 
-	def dp_del(self, path, **kwargs):
+	def dp_del(self, path, recursive, **kwargs):
 		""" delete datapoint(s) """
-		return self._msghandler.dp_del(path, **kwargs)
+		return self._msghandler.dp_del(path, recursive, **kwargs)
 
-	def dp_ren(self, oldpath, newpath, **kwargs):
+	def dp_ren(self, path, newPath, **kwargs):
 		""" rename datapoint(s) """
-		return self._msghandler.dp_ren(oldpath, newpath, **kwargs)
+		return self._msghandler.dp_ren(path, newPath, **kwargs)
 
 	def dp_sub(self, path, **kwargs):
 		""" subscribe monitoring of datapoints(s) """
@@ -729,8 +912,10 @@ class DMSClient(object):
 	def _busy_wait_until_ready(self, timeout=10000):
 		# FIXME: is there a better way to do this?
 		# FIXME: how to inform caller about problems, should we raise a selfmade timeout excpetion?
-		while not self.ready_to_send:
-			time.sleep(0.001)
+		loops = 0
+		while not self.ready_to_send and loops <= timeout:
+			time.sleep(TIMEOUT_TIMEBASE)
+			loops = loops + 1
 
 
 	def _send_message(self, msg):
@@ -785,7 +970,7 @@ if __name__ == '__main__':
 	# 	print('sending TESTMSG...')
 	# 	myClient._send_message(TESTMSG)
 
-	test_set = set([5])
+	test_set = set([7,8,9])
 
 	if 1 in test_set:
 		print('\nTesting creation of Request command:')
@@ -819,6 +1004,7 @@ if __name__ == '__main__':
 		                           start="2017-08-22T12:38:50.486000+02:00",
 		                           end="2017-08-23T12:38:50.486000+02:00",
 		                           format="compact",
+		                           #format="detail",
 		                           interval=0,
 		                           showExtInfos=True,
 		                           maxDepth=0)
@@ -826,7 +1012,32 @@ if __name__ == '__main__':
 
 	if 5 in test_set:
 		print('\nTesting writing of DMS datapoint:')
-		response = myClient.dp_set(path="MSR01:Test",
-		                           value=True,
+		response = myClient.dp_set(path="MSR01:Test_str",
+		                           value=80*"x",
 		                           create=True)
+		print('response: ' + repr(response))
+
+	if 6 in test_set:
+		print('\nTesting retrieving of value from test no.5:')
+		print('"get":')
+		response = myClient.dp_get(path="MSR01:Test_str")
+		print('response to our request: \n' + repr(response))
+
+	if 7 in test_set:
+		print('\nTesting writing of DMS datapoint:')
+		response = myClient.dp_set(path="MSR01:Test_int",
+		                           value=123,
+		                           create=True)
+		print('response: ' + repr(response))
+
+	if 8 in test_set:
+		print('\nTesting renaming of DMS datapoint:')
+		response = myClient.dp_ren(path="MSR01:Test_int",
+		                           newPath="MSR01:Test_int2")
+		print('response: ' + repr(response))
+
+	if 9 in test_set:
+		print('\nTesting deletion of DMS datapoint:')
+		response = myClient.dp_del(path="MSR01:Test_int2",
+		                           recursive=False)
 		print('response: ' + repr(response))
