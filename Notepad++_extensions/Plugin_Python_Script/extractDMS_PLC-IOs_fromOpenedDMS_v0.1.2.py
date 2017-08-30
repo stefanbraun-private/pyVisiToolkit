@@ -2,7 +2,7 @@
 # encoding: utf-8
 # (FIXME: problems with german Umlaut when "utf-8" or "windows-1252"... How to do a clean solution?!?)
 """
-extractDMS_PLC-IOs_fromOpenedDMS_v0.1.1.py
+extractDMS_PLC-IOs_fromOpenedDMS_v0.1.2.py
 Export a TAB-separated table with all used PLC ressources
 
 Usage:
@@ -32,6 +32,7 @@ You should have received a copy of the GNU General Public License along with thi
 """
 
 # Changelog:
+# BrS, 09.01.2017 / v0.0.2: add usage hint to user for correctly handling of german Umlaut
 # BrS, 04.04.2016 / v0.1.1:	Bugfix: now ignoring DMS-entries like "System:Text:GERMAN:ZW001:", they were handled as regular bmo instances because they have DMS node "NAME"...
 # BrS, 14.03.2016 / v0.1: 	little refactoring: put application code into main function
 #                         	added some usage hints, code released under GLP version 2
@@ -253,64 +254,99 @@ def handle_plcAO_match(match):
 	
 def main(argv=None):
 	console.show()
+	
+	# convert opened DMS file into Windows-1252 encoding
+	# hint by http://stackoverflow.com/questions/35526466/notepad-convert-to-utf-8-multiple-files
+	# strings found in files C:\Program Files (x86)\Notepad++\localization\...
+	#
+	# =>following code doesn't run... :-/
+	#try:
+	#	notepad.runMenuCommand("Kodierung", "Zeichensatz", "Westeuropäisch", "Windows-1252")
+	#except:
+	#	try:
+	#		notepad.runMenuCommand("Encoding", "Character Set", "Western European", "Windows-1252")
+	#	except:
+	#		console.write('ERROR: Could not change encoding of opened DMS... =>you should manually do "Kodierung"->"Zeichensatz"->"Westeuropäisch"->"Windows-1252" for correct interpretation of german Umlaut!')
+	#
+	# =>following code doesn't work as expected... :-/
+	#
+	#try:
+	#	notepad.runMenuCommand("Kodierung", "Konvertiere zu ANSI")
+	#except:
+	#	try:
+	#		notepad.runMenuCommand("Encoding", "Convert to ANSI")
+	#	except:
+	#		console.write('ERROR: Could not change encoding of opened DMS... =>you should manually do "Kodierung"->"Zeichensatz"->"Westeuropäisch"->"Windows-1252" for correct interpretation of german Umlaut!')
+	#
+	# =>following try doesn't run... :-/
+	# help from http://npppythonscript.sourceforge.net/docs/latest/notepad.html
+	# and http://npppythonscript.sourceforge.net/docs/latest/enums.html#MENUCOMMAND
+	#notepad.runMenuCommand(MENUCOMMAND.FORMAT_WIN_1252)
+	#
+	# User has to do it manually!!!
+	answer = notepad.messageBox('You should manually do this for correct interpretation of german Umlaut:\n"Kodierung"->"Zeichensatz"->"Westeuropäisch"->"Windows-1252"\n\nDo you want to continue?', 'Hint for usage', MESSAGEBOXFLAGS.YESNO)
+	if answer == MESSAGEBOXFLAGS.RESULTYES:
+		console.write('Analyzing current DMS file...\n\n')
+	
+		# get all OBJECTs in DMS
+		obj_searchPattern = '(^\w.+):OBJECT;STR;(\w.+);\w+'
+		editor.research(obj_searchPattern, handle_obj_match)
 
-	# get all OBJECTs in DMS
-	obj_searchPattern = '(^\w.+):OBJECT;STR;(\w.+);\w+'
-	editor.research(obj_searchPattern, handle_obj_match)
+		# get all NAMEs in DMS
+		name_searchPattern = '(^\w.+):NAME;STR;(\w.+);\w+'
+		editor.research(name_searchPattern, handle_name_match)
 
-	# get all NAMEs in DMS
-	name_searchPattern = '(^\w.+):NAME;STR;(\w.+);\w+'
-	editor.research(name_searchPattern, handle_name_match)
+		# get all ESchema in DMS
+		eschema_searchPattern = '(^\w.+):ESchema;STR;(\w.+);\w+'
+		editor.research(eschema_searchPattern, handle_eschema_match)
 
-	# get all ESchema in DMS
-	eschema_searchPattern = '(^\w.+):ESchema;STR;(\w.+);\w+'
-	editor.research(eschema_searchPattern, handle_eschema_match)
+		# get all PLC flags
+		flag_searchPattern = '(^\w.+);STR;F\.((\d+)|(\w+));'
+		editor.research(flag_searchPattern, handle_flag_match)
 
-	# get all PLC flags
-	flag_searchPattern = '(^\w.+);STR;F\.((\d+)|(\w+));'
-	editor.research(flag_searchPattern, handle_flag_match)
+		# get all PLC registers
+		register_searchPattern = '(^\w.+);STR;R\.((\d+)|(\w+));'
+		editor.research(register_searchPattern, handle_register_match)
 
-	# get all PLC registers
-	register_searchPattern = '(^\w.+);STR;R\.((\d+)|(\w+));'
-	editor.research(register_searchPattern, handle_register_match)
+		# get all PLC DIs
+		plcDI_searchPattern = '(^\w.+);STR;I\.(\d+);'
+		editor.research(plcDI_searchPattern, handle_plcDI_match)
 
-	# get all PLC DIs
-	plcDI_searchPattern = '(^\w.+);STR;I\.(\d+);'
-	editor.research(plcDI_searchPattern, handle_plcDI_match)
+		# get all PLC DOs
+		plcDO_searchPattern = '(^\w.+);STR;O\.(\d+);'
+		editor.research(plcDO_searchPattern, handle_plcDO_match)
 
-	# get all PLC DOs
-	plcDO_searchPattern = '(^\w.+);STR;O\.(\d+);'
-	editor.research(plcDO_searchPattern, handle_plcDO_match)
+		# get all PLC AIs
+		plcAI_searchPattern = '(^\w.+:Eing);FLT;([0-9]+)\.000000;'
+		editor.research(plcAI_searchPattern, handle_plcAI_match)
 
-	# get all PLC AIs
-	plcAI_searchPattern = '(^\w.+:Eing);FLT;([0-9]+)\.000000;'
-	editor.research(plcAI_searchPattern, handle_plcAI_match)
+		# get all PLC AOs
+		plcAO_searchPattern = '(^\w.+:StGr_Ausg);FLT;([0-9]+)\.000000;'
+		editor.research(plcAO_searchPattern, handle_plcAO_match)
 
-	# get all PLC AOs
-	plcAO_searchPattern = '(^\w.+:StGr_Ausg);FLT;([0-9]+)\.000000;'
-	editor.research(plcAO_searchPattern, handle_plcAO_match)
+		console.write('\n->Found ' + str(BMOobj.nofObj) + ' BMOs in given DMS-file.\n')
 
-	console.write('\n->Found ' + str(BMOobj.nofObj) + ' BMOs in given DMS-file.\n')
-
-	if BMOobj.titleList != []:
-		# table export of all values
-		# (first column "PLC" is unknown in BMOobj, that's why we have to add it now)
-		exportTable = '\t'.join(['PLC', 'BMO-Key'] + BMOobj.titleList) + '\n'
-		
-		for bmo in dmsObjects.keys():
-			currPlc = bmo.split(':')[0]
-			for currRow in dmsObjects[bmo].getListOfRows():
-				exportTable = exportTable + '\t'.join([currPlc, bmo, currRow]) + '\n'
-		
-		notepad.new()
-		editor.write(exportTable)
-		
-		console.write('\nSuccessfully built IO table for ' + str(BMOobj.nofObj) + ' BMOs in given DMS-file. Enjoy! :-)\n')
+		if BMOobj.titleList != []:
+			# table export of all values
+			# (first column "PLC" is unknown in BMOobj, that's why we have to add it now)
+			exportTable = '\t'.join(['PLC', 'BMO-Key'] + BMOobj.titleList) + '\n'
+			
+			for bmo in dmsObjects.keys():
+				currPlc = bmo.split(':')[0]
+				for currRow in dmsObjects[bmo].getListOfRows():
+					exportTable = exportTable + '\t'.join([currPlc, bmo, currRow]) + '\n'
+			
+			notepad.new()
+			editor.write(exportTable)
+			
+			console.write('\nSuccessfully built IO table for ' + str(BMOobj.nofObj) + ' BMOs in given DMS-file. Enjoy! :-)\n')
+		else:
+			console.write('ERROR: no BMO object in given DMS-file found!\n')
+			
+		return 0        # success
 	else:
-		console.write('ERROR: no BMO object in given DMS-file found!\n')
-		
-	return 0        # success
-
+		console.write('User aborted analysis...\n\n')
+		return 1
 
 if __name__ == '__main__':
 	status = main()
