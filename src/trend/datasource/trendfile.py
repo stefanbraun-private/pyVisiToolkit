@@ -20,7 +20,7 @@ import os
 import datetime
 import calendar
 from trend.datasource.dbdata import HighLevelDBData as DBData
-from trend.datasource.dbdata import HighLevelDBData as DBData2
+from trend.datasource.dbdata import HighLevelDBData2 as DBData2
 import configparser
 import string
 import re
@@ -69,8 +69,8 @@ def get_trendfile_structure_obj(file_fullpath):
 	filesize = os.path.getsize(file_fullpath)
 
 	# DBData could be ProMoS NT(c) version 1.x or version 2 =>choosing right version
-	# with help from http://stackoverflow.com/questions/541390/extracting-extension-from-filename-in-python
-	file_ext = os.path.splitext(file_fullpath)[1]
+	# trendfiles v1.x ends with ".hdb" , v2.x ends with ".hdbx"
+	file_ext = file_fullpath.split('.')[-1]
 	if file_ext.upper() == u'HDB':
 		# using ProMoS NT(c) version 1.x
 		curr_DBData_class = DBData

@@ -441,6 +441,14 @@ class CmdResponse(object):
 				print('constructor of CmdResponse(): ERROR: mandatory field "' + field + '" is missing in current response!')
 				self._values_dict[u'code'] = CmdResponse.CODE_ERROR
 
+		# some sanity checks
+		if not self._values_dict[u'code'] in (CmdResponse.CODE_OK,
+		                                      CmdResponse.CODE_NOPERM,
+		                                      CmdResponse.CODE_NOTFOUND,
+		                                      CmdResponse.CODE_ERROR):
+			print('constructor of CmdResponse(): ERROR: field "code" in current response contains unknown value "' + repr(self._values_dict[u'code']) + '"!')
+			# FIXME: what should we do if response code is unknown? Perhaps it's an unsupported JSON Data Exchange protocol?
+
 
 class CmdGetResponse(CmdResponse, collections.Mapping):
 	_fields = (u'path',
@@ -970,7 +978,7 @@ if __name__ == '__main__':
 	# 	print('sending TESTMSG...')
 	# 	myClient._send_message(TESTMSG)
 
-	test_set = set([7,8,9])
+	test_set = set([10])
 
 	if 1 in test_set:
 		print('\nTesting creation of Request command:')
@@ -1041,3 +1049,14 @@ if __name__ == '__main__':
 		response = myClient.dp_del(path="MSR01:Test_int2",
 		                           recursive=False)
 		print('response: ' + repr(response))
+
+	if 10 in test_set:
+		print('\nTesting retrieving of whole BMO:')
+		print('"get":')
+		for x in range(3):
+			response = myClient.dp_get(path="MSR01:And102",
+			                           showExtInfos=True,
+			                           maxDepth=-1,
+			                           )
+			print('response to our request: ' + repr(response))
+			print('*' * 20)

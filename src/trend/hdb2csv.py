@@ -47,8 +47,13 @@ class Converter(object):
 			f.write('\n')
 
 			for item in curr_trf.get_dbdata_elements_generator():
-				# help from http://stackoverflow.com/questions/12400256/python-converting-epoch-time-into-the-datetime
-				timestamp_str = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(item.getTimestamp()))
+				# using datetime object for getting millisecond resolution (DBData2) instead of using time (DBData)
+				# (with help from https://stackoverflow.com/questions/7588511/format-a-datetime-into-a-string-with-milliseconds
+				# we cut microseconds away. By the way: our datetime object is timezone-aware! :-) )
+				timestamp_str = item.get_datetime().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+
+				## help from http://stackoverflow.com/questions/12400256/python-converting-epoch-time-into-the-datetime
+				#timestamp_str = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(item.getTimestamp()))
 
 				## test with DST (daylight saving time)
 				#timestamp_str = time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime(item.getTimestamp()))
@@ -87,6 +92,10 @@ def main(argv=None):
 	#Converter(r'C:\Promos15\proj\Winterthur_MFH_Schaffhauserstrasse\dat\MSR01_Allg_Aussentemp_Istwert.hdb', r'D:\output3.csv').convert()
 	Converter(r'D:\Trend\Month_10.2016\MSR01_A_Allg_Aussentemp_Istwert.hdb', r'D:\Sommer2Winterzeit.csv').convert()
 	Converter(r'D:\Trend\Month_03.2017\MSR01_A_Allg_Aussentemp_Istwert.hdb', r'D:\Winter2Sommerzeit.csv').convert()
+
+	print('Test ProMoS v2.0 HDBX format:')
+	Converter(r'D:\Trend\digitaler_Wert_div-Messstellen_Rechtecksignal.hdbx', r'D:\HDBX_digital.csv').convert()
+	print('\tdone.')
 
 if __name__ == '__main__':
     status = main()

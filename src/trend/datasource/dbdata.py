@@ -182,20 +182,22 @@ class DBData(ctypes.Structure):
 
 
 class DBData2(ctypes.Structure):
-	# Trenddata struct in ProMoS v2.0 (based on comparison between *.hdb and *.hdbx files)
+	# Trenddata struct in ProMoS v2.0 (based on hexeditor comparison between *.hdb and *.hdbx files)
 	# ATTENTION: DBData struct in ProMoS v1.x has a length of 12 bytes, in ProMoS v2.x it has length of 24 bytes
-	# -timestamp (=>32bit unsigned integer),
-	# -unknown field 4 bytes,
+	# -timestamp (=>32bit unsigned integer, "Unix epoch"),
+	# -timestamp: fraction in milliseconds (=>16bit integer, assumption unsigned int) =>added in ProMoS v2.x
+	# -unknown field 2 bytes,
 	# -status (=>32bit bitmap, interpret as unsigned integer),
 	# -unknown field 4 bytes,
 	# -value (=>64bit IEEE float)
 	# https://docs.python.org/2/library/struct.html#format-characters
-	STRUCT_FORMAT = 'IIIId'
+	STRUCT_FORMAT = 'IHHIId'
 
 	# based on http://stackoverflow.com/questions/1444159/how-to-read-a-structure-containing-an-array-using-pythons-ctypes-and-readinto
 	_fields_ = [
 		("timestamp", ctypes.c_uint),
-		("unknown_bytes1", ctypes.c_char * 4),
+		("milliseconds", ctypes.c_ushort),
+		("unknown_bytes1", ctypes.c_char * 2),
 		("status", ctypes.c_uint),
 		("unknown_bytes2", ctypes.c_char * 4),
 		("value", ctypes.c_double)]
@@ -324,7 +326,7 @@ class HighLevelDBData2(DBData2):
 
 	def get_datetime(self):
 		# hints: https://docs.python.org/2/library/datetime.html#datetime.datetime
-		return datetime.datetime.fromtimestamp(self.timestamp, HighLevelDBData2._tz)
+		return datetime.datetime.fromtimestamp(self.getTimestamp(), HighLevelDBData2._tz)
 
 	def get_value_as_boolean(self):
 		return self.value > 0.0
@@ -338,7 +340,7 @@ class HighLevelDBData2(DBData2):
 
 	def __str__(self):
 		# a simple string prasentation
-		return 'timestamp=' + str(self.timestamp) + '\tvalue=' + str(self.value) + '\tstatus=' + str(
+		return 'timestamp=' + str(self.timestamp) + 'milliseconds=' + str(self.milliseconds) + '\tvalue=' + str(self.value) + '\tstatus=' + str(
 			self.status) + ' (' + self.getStatusBitsString() + ')'
 
 
@@ -347,7 +349,10 @@ class HighLevelDBData2(DBData2):
 
 
 	def getTimestamp(self):
-		return self.timestamp
+		# FIXME: should we return an integer as in DBData v1 or a float(self.timestamp + self.milliseconds)? Does it break other code?!?
+		# =>currently we return a float, built from a string with integer and fractional part of timestamp
+		assert 0 <= self.milliseconds <= 999, u'"milliseconds"-field of HDBX-file is corrupted!'
+		return float(str(self.timestamp) + '.' + str(self.milliseconds).zfill(3))
 
 
 	def getStatus(self):
@@ -373,12 +378,12 @@ class HighLevelDBData2(DBData2):
 	# (according to https://docs.python.org/2/library/sets.html )
 	def __hash__(self):
 		"""Override the default hash behavior (that returns the id of the object)"""
-		return hash(tuple([self.timestamp, self.value, self.status]))
+		return hash(tuple([self.timestamp, self.milliseconds, self.value, self.status]))
 
 
 	def __eq__(self, other):
 		"""Override the default equality behavior (that uses id of the object)"""
-		return self.timestamp == other.timestamp and self.value == other.value and self.status == other.status
+		return self.timestamp == other.timestamp and self.milliseconds == other.milliseconds and self.value == other.value and self.status == other.status
 
 
 	def __ne__(self, other):
