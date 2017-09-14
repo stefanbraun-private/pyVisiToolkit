@@ -350,9 +350,9 @@ class HighLevelDBData2(DBData2):
 
 	def getTimestamp(self):
 		# FIXME: should we return an integer as in DBData v1 or a float(self.timestamp + self.milliseconds)? Does it break other code?!?
-		# =>currently we return a float, built from a string with integer and fractional part of timestamp
+		# =>currently we return a float, built from integer and fractional part of timestamp
 		assert 0 <= self.milliseconds <= 999, u'"milliseconds"-field of HDBX-file is corrupted!'
-		return float(str(self.timestamp) + '.' + str(self.milliseconds).zfill(3))
+		return self.timestamp + self.milliseconds / 1000.0
 
 
 	def getStatus(self):
