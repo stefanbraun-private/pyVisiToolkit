@@ -691,6 +691,172 @@ class CmdDelResponse(CmdResponse, collections.Mapping):
 
 
 
+class CmdSubResponse(CmdResponse, collections.Mapping):
+	_fields = (u'path',
+	           u'value',
+	           u'type',
+	           u'stamp',
+	           u'message',
+	           u'tag')
+	# "query" object is optional
+	_opt_fields = (u'regExPath',
+	               u'regExValue',
+	               u'regExStamp',
+	               u'isType',
+	               u'hasHistData',
+	               u'hasAlarmData',
+	               u'hasProtocolData',
+	               u'maxDepth')
+
+	def __init__(self, **kwargs):
+		# better idea: do ducktyping without type checking,
+		# inherit from abstract class "Mapping" for getting dictionary-interface
+		# https://stackoverflow.com/questions/19775685/how-to-correctly-implement-the-mapping-protocol-in-python
+		# https://docs.python.org/2.7/library/collections.html#collections.MutableMapping
+		# (then the options are similar to Tkinter widgets: http://effbot.org/tkinterbook/tkinter-widget-configuration.htm )
+		#
+		#
+		## set all keyword arguments as instance attribut
+		## help from https://stackoverflow.com/questions/8187082/how-can-you-set-class-attributes-from-variable-arguments-kwargs-in-python
+		#self.__dict__.update(kwargs)
+
+		self._values_dict = {}
+
+		for field in CmdSubResponse._fields:
+			try:
+				if field == u'stamp':
+					# timestamps are ISO 8601 formatted (or "null" after DMS restart or on nodes with type "none")
+					# https://stackoverflow.com/questions/969285/how-do-i-translate-a-iso-8601-datetime-string-into-a-python-datetime-object
+					try:
+						self._values_dict[field] = dateutil.parser.parse(kwargs[field])
+					except:
+						self._values_dict[field] = None
+				else:
+					# default: no special treatment
+					self._values_dict[field] = kwargs[field]
+			except KeyError:
+				# argument was not in response =>setting default value
+				print('\tDEBUG: CmdSubResponse constructor: field "' + field + '" is not in response.')
+				self._values_dict[field] = None
+
+		# handle optional "query" object
+		# =>we insert an additional key "query" as flag if query was used.
+		# =>the fields have unique names, so we store them flat in our dictionary.
+		self._values_dict[u'query'] = u'query' in kwargs
+		for field in CmdSubResponse._opt_fields:
+			try:
+				# default: no special treatment
+				self._values_dict[field] = kwargs[u'query'][field]
+			except KeyError:
+				# argument was not in response =>setting default value
+				print('\tDEBUG: CmdSubResponse constructor: field "' + field + '" is not in response.')
+				self._values_dict[field] = None
+
+		# init all common fields
+		super(CmdSubResponse, self).__init__(**kwargs)
+
+
+	def __getitem__(self, key):
+		return self._values_dict[key]
+
+	def __iter__(self):
+		return iter(self._values_dict)
+
+	def __len__(self):
+		return len(self._values_dict)
+
+	def __repr__(self):
+		""" developer representation of this object """
+		return u'CmdSubResponse(' + repr(self._values_dict) + u')'
+
+	def __str__(self):
+		return u'' + str(self._values_dict)
+
+
+class CmdUnsubResponse(CmdResponse, collections.Mapping):
+	_fields = (u'path',
+	           u'value',
+	           u'type',
+	           u'stamp',
+	           u'message',
+	           u'tag')
+	# "query" object is optional
+	_opt_fields = (u'regExPath',
+	               u'regExValue',
+	               u'regExStamp',
+	               u'isType',
+	               u'hasHistData',
+	               u'hasAlarmData',
+	               u'hasProtocolData',
+	               u'maxDepth')
+
+	def __init__(self, **kwargs):
+		# better idea: do ducktyping without type checking,
+		# inherit from abstract class "Mapping" for getting dictionary-interface
+		# https://stackoverflow.com/questions/19775685/how-to-correctly-implement-the-mapping-protocol-in-python
+		# https://docs.python.org/2.7/library/collections.html#collections.MutableMapping
+		# (then the options are similar to Tkinter widgets: http://effbot.org/tkinterbook/tkinter-widget-configuration.htm )
+		#
+		#
+		## set all keyword arguments as instance attribut
+		## help from https://stackoverflow.com/questions/8187082/how-can-you-set-class-attributes-from-variable-arguments-kwargs-in-python
+		#self.__dict__.update(kwargs)
+
+		self._values_dict = {}
+
+		for field in CmdUnsubResponse._fields:
+			try:
+				if field == u'stamp':
+					# timestamps are ISO 8601 formatted (or "null" after DMS restart or on nodes with type "none")
+					# https://stackoverflow.com/questions/969285/how-do-i-translate-a-iso-8601-datetime-string-into-a-python-datetime-object
+					try:
+						self._values_dict[field] = dateutil.parser.parse(kwargs[field])
+					except:
+						self._values_dict[field] = None
+				else:
+					# default: no special treatment
+					self._values_dict[field] = kwargs[field]
+			except KeyError:
+				# argument was not in response =>setting default value
+				print('\tDEBUG: CmdUnsubResponse constructor: field "' + field + '" is not in response.')
+				self._values_dict[field] = None
+
+		# handle optional "query" object
+		# =>we insert an additional key "query" as flag if query was used.
+		# =>the fields have unique names, so we store them flat in our dictionary.
+		self._values_dict[u'query'] = u'query' in kwargs
+		for field in CmdUnsubResponse._opt_fields:
+			try:
+				# default: no special treatment
+				self._values_dict[field] = kwargs[u'query'][field]
+			except KeyError:
+				# argument was not in response =>setting default value
+				print('\tDEBUG: CmdUnsubResponse constructor: field "' + field + '" is not in response.')
+				self._values_dict[field] = None
+
+		# init all common fields
+		super(CmdUnsubResponse, self).__init__(**kwargs)
+
+
+	def __getitem__(self, key):
+		return self._values_dict[key]
+
+	def __iter__(self):
+		return iter(self._values_dict)
+
+	def __len__(self):
+		return len(self._values_dict)
+
+	def __repr__(self):
+		""" developer representation of this object """
+		return u'CmdUnsubResponse(' + repr(self._values_dict) + u')'
+
+	def __str__(self):
+		return u'' + str(self._values_dict)
+
+
+
+
 class _MessageHandler(object):
 	def __init__(self, dmsclient_obj, whois_str, user_str):
 		# backreference for sending messages
