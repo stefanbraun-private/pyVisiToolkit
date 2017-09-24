@@ -36,6 +36,10 @@ import thread
 import collections
 import dateutil.parser, datetime
 
+# events handling https://github.com/axel-events/axel
+# =>installed with pip from https://anaconda.org/pypi/axel
+import axel
+
 
 TESTMSG = (u'{ "get": [ {"path":"System:Time"} ] }')
 
@@ -280,6 +284,86 @@ class _DMSCmdDel(object):
 
 	def get_type(self):
 		return _DMSCmdDel.CMD_TYPE
+
+
+
+class _DMSCmdSub(object):
+	""" one unique "subscribe" request, parsed from **kwargs """
+
+	CMD_TYPE = u'subscribe'
+
+	def __init__(self, msghandler, path, **kwargs):
+		# parsing of kwargs: help from https://stackoverflow.com/questions/5624912/kwargs-parsing-best-practice
+		# =>since all fields in "get" object and all it's subobjects are unique, we could handle them in the same loop
+		self.path = u'' + path
+		self.query = {}
+		self.tag = msghandler.generate_tag()
+
+		for key in kwargs:
+			# parsing "query" object
+			val = None
+			if key == u'regExPath':
+				val = u'' + kwargs[key]
+			elif key == u'regExValue':
+				val = u'' + kwargs[key]
+			elif key == u'regExStamp':
+				val = u'' + kwargs[key]
+			elif key == u'isType':
+				val = u'' + kwargs[key]
+			elif key == u'hasHistData':
+				val = bool(kwargs[key])
+			elif key == u'hasAlarmData':
+				val = bool(kwargs[key])
+			elif key == u'hasProtocolData':
+				val = bool(kwargs[key])
+			elif key == u'maxDepth':
+				val = int(kwargs[key])
+
+			if val:
+				self.query[key] = val
+
+			# parsing properties
+			if key == u'event':
+				# FIXME: we should implement something similar as in "sticky"-options of http://effbot.org/tkinterbook/grid.htm
+				#        =>defining int-constants CHANGE=1, SET=2, CREATE=4, RENAME=8, DELETE=16, ALL=31,
+				#          or handle these flags as string in a set()
+				self.event = u'' + kwargs[key]
+
+
+	def as_dict(self):
+		curr_dict = {}
+		curr_dict[u'path'] = self.path
+		if self.query:
+			curr_dict[u'query'] = self.query
+		if self.event:
+			curr_dict[u'event'] = self.event
+		curr_dict[u'tag'] = self.tag
+		return curr_dict
+
+	def get_type(self):
+		return _DMSCmdSub.CMD_TYPE
+
+
+
+class _DMSCmdUnsub(object):
+	""" one unique "unsubscribe" request, parsed from **kwargs """
+
+	CMD_TYPE = u'unsubscribe'
+
+	def __init__(self, msghandler, path, tag):
+		# =>because our subscriptions always use a tag, we have to make tags mandatory
+		# (documentation for "unsubscribe" say "tag" is an optional field)
+		self.path = u'' + path
+		self.tag = tag
+
+	def as_dict(self):
+		curr_dict = {}
+		curr_dict[u'path'] = self.path
+		curr_dict[u'tag'] = self.tag
+		return curr_dict
+
+	def get_type(self):
+		return _DMSCmdUnsub.CMD_TYPE
 
 
 
@@ -853,6 +937,23 @@ class CmdUnsubResponse(CmdResponse, collections.Mapping):
 
 	def __str__(self):
 		return u'' + str(self._values_dict)
+
+
+class Subscription(axel.Event):
+	''' mapping python callbacks to DMS events '''
+	# using "axel events" for events handling https://github.com/axel-events/axel
+
+	# FIXME: how to "glue everything together"?
+	# FIXME: which information does this class need for doing:
+	#        -subscriptions
+	#        -updates to those
+	#        -re-subscriptions
+	#        -unsubscriptions
+	def __init__(self, msghandler, path, tag, **kwargs):
+
+
+		# init Event class
+		super(Subscription, self).__init__(**kwargs)
 
 
 
