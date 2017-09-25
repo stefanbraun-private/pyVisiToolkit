@@ -297,7 +297,12 @@ class _DMSCmdSub(object):
 		# =>since all fields in "get" object and all it's subobjects are unique, we could handle them in the same loop
 		self.path = u'' + path
 		self.query = {}
-		self.tag = msghandler.generate_tag()
+		if not u'tag' in kwargs:
+			self.tag = msghandler.generate_tag()
+		else:
+			# caller wants to reuse existing tag =>DMS will update subscription when path and tag match a current subscription
+			self.tag = kwargs[u'tag']
+
 
 		for key in kwargs:
 			# parsing "query" object
@@ -350,8 +355,8 @@ class _DMSCmdUnsub(object):
 
 	CMD_TYPE = u'unsubscribe'
 
-	def __init__(self, msghandler, path, tag):
-		# =>because our subscriptions always use a tag, we have to make tags mandatory
+	def __init__(self, path, tag):
+		# =>because our implementation of subscriptions always use a tag, we have to make tags mandatory
 		# (documentation for "unsubscribe" say "tag" is an optional field)
 		self.path = u'' + path
 		self.tag = tag
@@ -939,7 +944,7 @@ class CmdUnsubResponse(CmdResponse, collections.Mapping):
 		return u'' + str(self._values_dict)
 
 
-class Subscription(axel.Event):
+class Subscription(object):
 	''' mapping python callbacks to DMS events '''
 	# using "axel events" for events handling https://github.com/axel-events/axel
 
@@ -949,11 +954,120 @@ class Subscription(axel.Event):
 	#        -updates to those
 	#        -re-subscriptions
 	#        -unsubscriptions
-	def __init__(self, msghandler, path, tag, **kwargs):
+	def __init__(self, msghandler, sub_response):
+		self._msghandler = msghandler
+		self.sub_response = sub_response
+		# details about constructor of Event():
+		# https://github.com/axel-events/axel/blob/master/axel/axel.py
+		self.event = axel.Event(threads=1)
+
+	def get_path_tag(self):
+		return self.sub_response[u'path'], self.sub_response[u'tag']
+
+	def update(self, **kwargs):
+		# FIXME for performance: detect changes in "query" and "event",
+		# if changed, then overwrite subscription in DMS,
+		# else resubscribe (currently we send request in every case...)
+		# FIXME: how to report errors to caller?
+
+		# reuse "path" and "tag", then DMS will replace subscription
+		if u'path' in kwargs:
+			del(kwargs[u'path'])
+		kwargs[u'tag'] = self.sub_response.tag
+		resp = self._msghandler.dp_sub(path=self.sub_response.path, **kwargs)
 
 
-		# init Event class
-		super(Subscription, self).__init__(**kwargs)
+	def unsubscribe(self):
+		# FIXME: how to report errors to caller?
+		resp = self._msghandler._dp_unsub(path=self.sub_response.path,
+		                                  tag=self.sub_response.tag)
+		self._msghandler.del_subscription(self)
+
+	def __del__(self):
+		# destructor: first unsubscribe from DMS,
+		# we assume garbage collector will delete all internal references
+		self.unsubscribe()
+
+
+class CmdEvent(collections.Mapping):
+	# string constants
+	CODE_CHANGE = u'onChange'
+	CODE_SET = u'onSet'
+	CODE_CREATE = u'onCreate'
+	CODE_RENAME = u'onRename'
+	CODE_DELETE = u'onDelete'
+
+	_fields = (u'code',
+	           u'path',
+	           u'newPath',
+	           u'trigger',
+	           u'value',
+	           u'type',
+	           u'stamp',
+	           u'tag')
+
+
+
+	def __init__(self, **kwargs):
+		# better idea: do ducktyping without type checking,
+		# inherit from abstract class "Mapping" for getting dictionary-interface
+		# https://stackoverflow.com/questions/19775685/how-to-correctly-implement-the-mapping-protocol-in-python
+		# https://docs.python.org/2.7/library/collections.html#collections.MutableMapping
+		# (then the options are similar to Tkinter widgets: http://effbot.org/tkinterbook/tkinter-widget-configuration.htm )
+		#
+		#
+		## set all keyword arguments as instance attribut
+		## help from https://stackoverflow.com/questions/8187082/how-can-you-set-class-attributes-from-variable-arguments-kwargs-in-python
+		#self.__dict__.update(kwargs)
+
+		self._values_dict = {}
+
+		for field in CmdEvent._fields:
+			try:
+				if field == u'stamp':
+					# timestamps are ISO 8601 formatted (or "null" after DMS restart or on nodes with type "none")
+					# https://stackoverflow.com/questions/969285/how-do-i-translate-a-iso-8601-datetime-string-into-a-python-datetime-object
+					try:
+						self._values_dict[field] = dateutil.parser.parse(kwargs[field])
+					except:
+						self._values_dict[field] = None
+				elif field == u'code':
+					# attention: difference to other commands: "code" in DMS-events means trigger of this event
+					self._values_dict[field] = u'' + kwargs[field]
+				else:
+					# default: no special treatment
+					self._values_dict[field] = kwargs[field]
+			except KeyError:
+				# argument was not in response =>setting default value
+				print('\tDEBUG: CmdEvent constructor: field "' + field + '" is not in response.')
+				self._values_dict[field] = None
+
+		# sanity check:
+		if not self._values_dict[u'code'] in (CmdEvent.CODE_CHANGE,
+		                                      CmdEvent.CODE_SET,
+		                                      CmdEvent.CODE_CREATE,
+		                                      CmdEvent.CODE_RENAME,
+		                                      CmdEvent.CODE_DELETE):
+					print(
+						'constructor of CmdEvent(): ERROR: field "code" in current response contains unknown value "' + repr(
+							self._values_dict[u'code']) + '"!')
+
+	def __getitem__(self, key):
+		return self._values_dict[key]
+
+	def __iter__(self):
+		return iter(self._values_dict)
+
+	def __len__(self):
+		return len(self._values_dict)
+
+	def __repr__(self):
+		""" developer representation of this object """
+		return u'CmdEvent(' + repr(self._values_dict) + u')'
+
+	def __str__(self):
+		return u'' + str(self._values_dict)
+
 
 
 
@@ -968,6 +1082,11 @@ class _MessageHandler(object):
 		# dict for pending responses (key: cmd-tag, value: list of CmdResponse-objects)
 		# =>None means request is sent, but answer is not yet here
 		self._pending_response_dict = {}
+
+		# dict for DMS-events (key: tuple path+tag, value: Subscription-objects)
+		# =>DMS-event will fire our python event
+		self._subscriptions_dict = {}
+
 
 		# object for assembling response lists
 		# (when one "get" command produces more than one response)
@@ -1054,11 +1173,39 @@ class _MessageHandler(object):
 
 	def dp_sub(self, path, timeout=10000, **kwargs):
 		""" subscribe monitoring of datapoints(s) """
-		pass
 
-	def dp_unsub(self, path, timeout=10000, **kwargs):
+		req = _DMSRequest(whois=self._whois_str, user=self._user_str).addCmd(
+			_DMSCmdSub(msghandler=self, path=path, **kwargs))
+		self._send_frame(req)
+
+		try:
+			tag = req.get_tags()[0]
+			return self._busy_wait_for_response(tag, timeout)
+		except IndexError:
+			# something went wrong...
+			if DEBUGGING:
+				print('error in dp_ren(): len(req.get_tags())=' + str(len(
+					req.get_tags())) + ', too much or too few responses? sending more than one command per request is not implemented!')
+			raise Exception('Please report this bug of pyVisiToolkit!')
+
+
+
+	def _dp_unsub(self, path, tag, timeout=10000, **kwargs):
 		""" unsubscribe monitoring of datapoint(s) """
-		pass
+		# =>called by Subscription.unsubscribe()
+		req = _DMSRequest(whois=self._whois_str, user=self._user_str).addCmd(
+			_DMSCmdUnsub(path=path, tag=tag))
+		self._send_frame(req)
+
+		try:
+			return self._busy_wait_for_response(tag, timeout)
+		except IndexError:
+			# something went wrong...
+			if DEBUGGING:
+				print('error in dp_ren(): len(req.get_tags())=' + str(len(
+					req.get_tags())) + ', too much or too few responses? sending more than one command per request is not implemented!')
+			raise Exception('Please report this bug of pyVisiToolkit!')
+
 
 	def handle(self, msg):
 		payload_dict = json.loads(msg.decode('utf8'))
@@ -1068,7 +1215,9 @@ class _MessageHandler(object):
 			for resp_type, resp_cls in [(u'get',    CmdGetResponse),
 			                            (u'set',    CmdSetResponse),
 			                            (u'rename', CmdRenResponse),
-			                            (u'delete', CmdDelResponse)]:
+			                            (u'delete', CmdDelResponse),
+			                            (u'subscribe', CmdSubResponse),
+			                            (u'unsubscribe', CmdUnsubResponse)]:
 				if resp_type in payload_dict:
 					# handling responses to command
 
@@ -1105,9 +1254,32 @@ class _MessageHandler(object):
 					if DEBUGGING:
 						print('\tmessage handler: storing of response for other thread...')
 					self._pending_response_dict[curr_tag] = self._curr_response.resp_list
-
 		except Exception as ex:
 			print("exception in _MessageHandler.handle(): " + repr(ex))
+
+
+		if u'event' in payload_dict:
+			# handling DMS-events
+			for event in payload_dict[u'event']:
+				# trigger Python event
+				try:
+					event_obj = CmdEvent(**event)
+					path, tag = event_obj[u'path'], event_obj[u'tag']
+					sub = self._subscriptions_dict[(path, tag)]
+					# print('DEBUGGING: _MsgHandler.handle(), sub=' + repr(sub) + ', sub.event=' + repr(sub.event))
+					result = sub.event(event_obj)
+					# FIXME: how to inform caller about exceptions while executing his callbacks?
+					# FIXME: should we use Python logger framework?
+					if DEBUGGING:
+						print('DEBUGGING: _MsgHandler.handle(), result of event-firing: result=' + repr(result))
+				except AttributeError as ex:
+					print("exception in _MessageHandler.handle(): DMS-event seems corrupted: " + repr(ex))
+				except KeyError as ex:
+					print("exception in _MessageHandler.handle(): DMS-event is not registered: " + repr(ex))
+				except Exception as ex:
+					print("exception in _MessageHandler.handle(): DMS-event raises " + repr(ex))
+
+
 
 	def _send_frame(self, frame_obj):
 		# send whole request
@@ -1127,6 +1299,14 @@ class _MessageHandler(object):
 			if self._pending_response_dict[tag]:
 				found = True
 		return self._pending_response_dict.pop(tag)
+
+	def add_subscription(self, sub):
+		path, tag = sub.get_path_tag()
+		self._subscriptions_dict[(path, tag)] = sub
+
+	def del_subscription(self, sub):
+		path, tag = sub.get_path_tag()
+		del(self._subscriptions_dict[(path, tag)])
 
 
 	def generate_tag(self):
@@ -1176,13 +1356,20 @@ class DMSClient(object):
 		""" rename datapoint(s) """
 		return self._msghandler.dp_ren(path, newPath, **kwargs)
 
-	def dp_sub(self, path, **kwargs):
+	def get_dp_subscription(self, path, **kwargs):
 		""" subscribe monitoring of datapoints(s) """
-		return self._msghandler.dp_sub(path, **kwargs)
+		# FIXME: now we care only the first response... is this ok in every case?
+		response = self._msghandler.dp_sub(path, **kwargs)[0]
+		print('DEBUGGING: type(response)=' + repr(type(response)) + ', repr(response)=' + repr(response))
+		if response["code"] == u'ok':
+			# DMS accepted subscription
+			sub = Subscription(msghandler=self._msghandler, sub_response=response)
+			self._msghandler.add_subscription(sub)
+			return sub
+		else:
+			raise Exception(u'DMS ignored subscription of "' + path + '" with error "' + response.code + '"!')
 
-	def dp_unsub(self, path, **kwargs):
-		""" unsubscribe monitoring of datapoint(s) """
-		return self._msghandler.dp_unsub(path, **kwargs)
+
 
 	def _busy_wait_until_ready(self, timeout=10000):
 		# FIXME: is there a better way to do this?
@@ -1245,7 +1432,7 @@ if __name__ == '__main__':
 	# 	print('sending TESTMSG...')
 	# 	myClient._send_message(TESTMSG)
 
-	test_set = set([10])
+	test_set = set([11])
 
 	if 1 in test_set:
 		print('\nTesting creation of Request command:')
@@ -1327,3 +1514,17 @@ if __name__ == '__main__':
 			                           )
 			print('response to our request: ' + repr(response))
 			print('*' * 20)
+
+	if 11 in test_set:
+		print('\nTesting monitoring of DMS datapoint:')
+		sub = myClient.get_dp_subscription(path="System:Blinker:Blink1.0",
+		                                        event="onChange",
+		                                        maxDepth=-1)
+		print('got Subscription object: ' + repr(sub))
+		print('\tadding callback function:')
+		def myfunc(event):
+			print('\t\tGOT EVENT: ' + repr(event))
+		sub.event += myfunc
+		print('\twaiting some seconds...')
+		for x in range(100):
+			time.sleep(0.1)
