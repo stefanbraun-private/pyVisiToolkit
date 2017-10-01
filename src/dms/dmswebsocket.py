@@ -33,6 +33,7 @@ import time
 import uuid
 import websocket
 import thread
+import threading
 import collections
 import dateutil.parser, datetime
 
@@ -944,22 +945,18 @@ class CmdUnsubResponse(CmdResponse, collections.Mapping):
 		return u'' + str(self._values_dict)
 
 
-class Subscription(object):
+class Subscription(axel.Event):
 	''' mapping python callbacks to DMS events '''
-	# using "axel events" for events handling https://github.com/axel-events/axel
+	# extending "axel events" for events handling https://github.com/axel-events/axel
+	# =>caller has to attach his callback functions to this object.
+	# (Factory for this object is in DMSClient.get_dp_subscription())
 
-	# FIXME: how to "glue everything together"?
-	# FIXME: which information does this class need for doing:
-	#        -subscriptions
-	#        -updates to those
-	#        -re-subscriptions
-	#        -unsubscriptions
 	def __init__(self, msghandler, sub_response):
 		self._msghandler = msghandler
 		self.sub_response = sub_response
 		# details about constructor of Event():
 		# https://github.com/axel-events/axel/blob/master/axel/axel.py
-		self.event = axel.Event(threads=1)
+		super(Subscription, self).__init__(threads=1)
 
 	def get_path_tag(self):
 		return self.sub_response[u'path'], self.sub_response[u'tag']
@@ -979,8 +976,8 @@ class Subscription(object):
 
 	def unsubscribe(self):
 		# FIXME: how to report errors to caller?
-		resp = self._msghandler._dp_unsub(path=self.sub_response.path,
-		                                  tag=self.sub_response.tag)
+		resp = self._msghandler._dp_unsub(path=self.sub_response[u'path'],
+		                                  tag=self.sub_response[u'tag'])
 		self._msghandler.del_subscription(self)
 
 	def __del__(self):
@@ -1267,11 +1264,15 @@ class _MessageHandler(object):
 					path, tag = event_obj[u'path'], event_obj[u'tag']
 					sub = self._subscriptions_dict[(path, tag)]
 					# print('DEBUGGING: _MsgHandler.handle(), sub=' + repr(sub) + ', sub.event=' + repr(sub.event))
-					result = sub.event(event_obj)
-					# FIXME: how to inform caller about exceptions while executing his callbacks?
-					# FIXME: should we use Python logger framework?
+					# firing Python callback functions registered in axel.Event()
+					# (result is tuple of tuples: https://github.com/axel-events/axel/blob/master/axel/axel.py#L122 )
+					result = sub(event_obj)
 					if DEBUGGING:
-						print('DEBUGGING: _MsgHandler.handle(), result of event-firing: result=' + repr(result))
+						# FIXME: how to inform caller about exceptions while executing his callbacks?
+						# FIXME: should we use Python logger framework?
+						print('DEBUGGING: _MsgHandler.handle(), result of event-firing on axel.Event object:')
+						for idx, res in enumerate(result):
+							print('=>result of callback number ' + str(idx) + ': ' + repr(res))
 				except AttributeError as ex:
 					print("exception in _MessageHandler.handle(): DMS-event seems corrupted: " + repr(ex))
 				except KeyError as ex:
@@ -1323,7 +1324,10 @@ class DMSClient(object):
 		self._dms_host_str = dms_host_str
 		self._dms_port_int = dms_port_int
 		self._msghandler = _MessageHandler(dmsclient_obj=self, whois_str=whois_str, user_str=user_str)
-		self.ready_to_send = False
+
+		# thread synchronisation flag for Websocket connection state
+		# (documentation: https://docs.python.org/2/library/threading.html#event-objects )
+		self.ready_to_send = threading.Event()
 
 		# based on example on https://github.com/websocket-client/websocket-client
 		#websocket.enableTrace(True)
@@ -1370,19 +1374,8 @@ class DMSClient(object):
 			raise Exception(u'DMS ignored subscription of "' + path + '" with error "' + response.code + '"!')
 
 
-
-	def _busy_wait_until_ready(self, timeout=10000):
-		# FIXME: is there a better way to do this?
-		# FIXME: how to inform caller about problems, should we raise a selfmade timeout excpetion?
-		loops = 0
-		while not self.ready_to_send and loops <= timeout:
-			time.sleep(TIMEOUT_TIMEBASE)
-			loops = loops + 1
-
-
 	def _send_message(self, msg):
-		self._busy_wait_until_ready()
-		if self.ready_to_send:
+		if self.ready_to_send.wait(timeout=10):     # timeout in seconds
 			if DEBUGGING:
 				print('DMSClient._send_message(): sending request "' + repr(msg) + '"')
 			self._ws.send(msg)
@@ -1406,12 +1399,12 @@ class DMSClient(object):
 	def _cb_on_open(self, ws):
 		if DEBUGGING:
 			print("_on_open(): WebSocket connection is established.")
-		self.ready_to_send = True
+		self.ready_to_send.set()
 
 	def _cb_on_close(self, ws):
 		if DEBUGGING:
 			print("_on_close(): server closed connection =>shutting down client thread")
-		self.ready_to_send = False
+		self.ready_to_send.clear()
 		self._ws_thread.exit()
 
 	def __del__(self):
@@ -1516,15 +1509,25 @@ if __name__ == '__main__':
 			print('*' * 20)
 
 	if 11 in test_set:
-		print('\nTesting monitoring of DMS datapoint:')
-		sub = myClient.get_dp_subscription(path="System:Blinker:Blink1.0",
+		dms_blinker_str = "System:Blinker:Blink1.0"
+		print('Testing monitoring of DMS datapoint "' + dms_blinker_str + '"')
+		sub = myClient.get_dp_subscription(path=dms_blinker_str,
 		                                        event="onChange",
 		                                        maxDepth=-1)
 		print('got Subscription object: ' + repr(sub))
-		print('\tadding callback function:')
+		print('adding callback function:')
 		def myfunc(event):
 			print('\t\tGOT EVENT: ' + repr(event))
-		sub.event += myfunc
-		print('\twaiting some seconds...')
-		for x in range(100):
+		sub += myfunc
+
+		print('waiting some seconds while callback should getting fired in background...')
+		for x in range(50):
 			time.sleep(0.1)
+
+		print('unsubscription test...')
+		sub.unsubscribe()
+
+		print('waiting some seconds while no new event should fire...')
+		for x in range(30):
+			time.sleep(0.1)
+		print('Done.')
