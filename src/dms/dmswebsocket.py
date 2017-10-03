@@ -958,8 +958,8 @@ class Subscription(axel.Event):
 		# https://github.com/axel-events/axel/blob/master/axel/axel.py
 		super(Subscription, self).__init__(threads=1)
 
-	def get_path_tag(self):
-		return self.sub_response[u'path'], self.sub_response[u'tag']
+	def get_tag(self):
+		return self.sub_response[u'tag']
 
 	def update(self, **kwargs):
 		# FIXME for performance: detect changes in "query" and "event",
@@ -968,10 +968,12 @@ class Subscription(axel.Event):
 		# FIXME: how to report errors to caller?
 
 		# reuse "path" and "tag", then DMS will replace subscription
+		assert not u'path' in kwargs, u'DMS uses path and tag for identifying subscription. Changing is not allowed!'
+		assert not u'tag' in kwargs, u'DMS uses path and tag for identifying subscription. Changing is not allowed!'
 		if u'path' in kwargs:
 			del(kwargs[u'path'])
-		kwargs[u'tag'] = self.sub_response.tag
-		resp = self._msghandler.dp_sub(path=self.sub_response.path, **kwargs)
+		kwargs[u'tag'] = self.sub_response[u'tag']
+		resp = self._msghandler.dp_sub(path=self.sub_response[u'path'], **kwargs)
 
 
 	def unsubscribe(self):
@@ -1080,8 +1082,9 @@ class _MessageHandler(object):
 		# =>None means request is sent, but answer is not yet here
 		self._pending_response_dict = {}
 
-		# dict for DMS-events (key: tuple path+tag, value: Subscription-objects)
+		# dict for DMS-events (key: tag, value: Subscription-objects)
 		# =>DMS-event will fire our python event
+		# (our chosen tag for DMS subscription command is unique across all events related to this subscription)
 		self._subscriptions_dict = {}
 
 
@@ -1261,18 +1264,23 @@ class _MessageHandler(object):
 				# trigger Python event
 				try:
 					event_obj = CmdEvent(**event)
-					path, tag = event_obj[u'path'], event_obj[u'tag']
-					sub = self._subscriptions_dict[(path, tag)]
+					tag = event_obj[u'tag']
+					sub = self._subscriptions_dict[tag]
 					# print('DEBUGGING: _MsgHandler.handle(), sub=' + repr(sub) + ', sub.event=' + repr(sub.event))
+
 					# firing Python callback functions registered in axel.Event()
 					# (result is tuple of tuples: https://github.com/axel-events/axel/blob/master/axel/axel.py#L122 )
-					result = sub(event_obj)
-					if DEBUGGING:
-						# FIXME: how to inform caller about exceptions while executing his callbacks?
-						# FIXME: should we use Python logger framework?
-						print('DEBUGGING: _MsgHandler.handle(), result of event-firing on axel.Event object:')
-						for idx, res in enumerate(result):
-							print('=>result of callback number ' + str(idx) + ': ' + repr(res))
+					if len(sub) > 0:
+						result = sub(event_obj)
+						if DEBUGGING:
+							# FIXME: how to inform caller about exceptions while executing his callbacks?
+							# FIXME: should we use Python logger framework?
+							print('DEBUGGING: _MsgHandler.handle(), result of event-firing on axel.Event object:')
+							for idx, res in enumerate(result):
+								print('=>result of callback number ' + str(idx) + ': ' + repr(res))
+					else:
+						if DEBUGGING:
+							print('DEBUGGING: _MsgHandler.handle(), axel.Event object is empty, suppressing event-firing...')
 				except AttributeError as ex:
 					print("exception in _MessageHandler.handle(): DMS-event seems corrupted: " + repr(ex))
 				except KeyError as ex:
@@ -1302,12 +1310,12 @@ class _MessageHandler(object):
 		return self._pending_response_dict.pop(tag)
 
 	def add_subscription(self, sub):
-		path, tag = sub.get_path_tag()
-		self._subscriptions_dict[(path, tag)] = sub
+		tag = sub.get_tag()
+		self._subscriptions_dict[tag] = sub
 
 	def del_subscription(self, sub):
-		path, tag = sub.get_path_tag()
-		del(self._subscriptions_dict[(path, tag)])
+		tag = sub.get_tag()
+		del(self._subscriptions_dict[tag])
 
 
 	def generate_tag(self):
@@ -1521,7 +1529,17 @@ if __name__ == '__main__':
 		sub += myfunc
 
 		print('waiting some seconds while callback should getting fired in background...')
-		for x in range(50):
+		for x in range(30):
+			time.sleep(0.1)
+
+		print('changing eventfilter in DMS subscription...')
+		sub.update(event='*')
+		for x in range(30):
+			time.sleep(0.1)
+
+		print('waiting some seconds with active DMS subscription but without Python callbackfunction...')
+		sub -= myfunc
+		for x in range(30):
 			time.sleep(0.1)
 
 		print('unsubscription test...')
@@ -1530,4 +1548,29 @@ if __name__ == '__main__':
 		print('waiting some seconds while no new event should fire...')
 		for x in range(30):
 			time.sleep(0.1)
+
+		print('Done.')
+
+
+
+	if 12 in test_set:
+		dms_path_str = ""
+		print('Testing monitoring of DMS datapoint "' + dms_path_str + '"')
+		sub = myClient.get_dp_subscription(path=dms_path_str,
+		                                        event="onCreate",
+		                                        maxDepth=-1)
+		print('got Subscription object: ' + repr(sub))
+		print('adding callback function:')
+		def myfunc(event):
+			print('\t\tGOT EVENT: ' + repr(event))
+		sub += myfunc
+
+		print('waiting some seconds while callback should getting fired in background...')
+		for x in range(100):
+			time.sleep(0.1)
+
+		print('unsubscription test...')
+		sub.unsubscribe()
+		time.sleep(2)
+
 		print('Done.')
