@@ -1078,14 +1078,22 @@ class _MessageHandler(object):
 		self._whois_str = whois_str
 		self._user_str = user_str
 
+		# thread safety for shared dictionaries =>we want to be on the safe side!
+		# (documentation: https://docs.python.org/2/library/threading.html#lock-objects )
+		# http://effbot.org/pyfaq/what-kinds-of-global-value-mutation-are-thread-safe.htm
+		# https://stackoverflow.com/questions/8487673/how-would-you-make-this-python-dictionary-thread-safe
+
 		# dict for pending responses (key: cmd-tag, value: list of CmdResponse-objects)
 		# =>None means request is sent, but answer is not yet here
 		self._pending_response_dict = {}
+		self._pending_response_lock = threading.Lock()
+
 
 		# dict for DMS-events (key: tag, value: Subscription-objects)
 		# =>DMS-event will fire our python event
 		# (our chosen tag for DMS subscription command is unique across all events related to this subscription)
 		self._subscriptions_dict = {}
+		self._subscriptions_lock = threading.Lock()
 
 
 		# object for assembling response lists
@@ -1235,13 +1243,14 @@ class _MessageHandler(object):
 								# found a new tag =>save old list and create a new one
 								if self._curr_response.msg_tag and self._curr_response.resp_list:
 									# need to save last responses
-									if curr_tag in self._pending_response_dict:
-										if DEBUGGING:
-											print('\tmessage handler: found different tags in response. Storing response for other thread...')
-										self._pending_response_dict[curr_tag] = self._curr_response.resp_list
-									else:
-										if DEBUGGING:
-											print('\tmessage handler: ignoring unexpected response "' + repr(self._curr_response.resp_list) + '"...')
+									with self._pending_response_lock:
+										if curr_tag in self._pending_response_dict:
+											if DEBUGGING:
+												print('\tmessage handler: found different tags in response. Storing response for other thread...')
+											self._pending_response_dict[curr_tag] = self._curr_response.resp_list
+										else:
+											if DEBUGGING:
+												print('\tmessage handler: ignoring unexpected response "' + repr(self._curr_response.resp_list) + '"...')
 								# begin of new response list
 								self._curr_response.msg_tag = curr_tag
 								self._curr_response.resp_list = [resp_cls(**response)]
@@ -1250,10 +1259,11 @@ class _MessageHandler(object):
 							if DEBUGGING:
 								print('\tmessage handler: ignoring untagged response "' + repr(response) + '"...')
 
-					# storing collected list for other thread
-					if DEBUGGING:
-						print('\tmessage handler: storing of response for other thread...')
-					self._pending_response_dict[curr_tag] = self._curr_response.resp_list
+					with self._pending_response_lock:
+						# storing collected list for other thread
+						if DEBUGGING:
+							print('\tmessage handler: storing of response for other thread...')
+						self._pending_response_dict[curr_tag] = self._curr_response.resp_list
 		except Exception as ex:
 			print("exception in _MessageHandler.handle(): " + repr(ex))
 
@@ -1265,7 +1275,8 @@ class _MessageHandler(object):
 				try:
 					event_obj = CmdEvent(**event)
 					tag = event_obj[u'tag']
-					sub = self._subscriptions_dict[tag]
+					with self._subscriptions_lock:
+						sub = self._subscriptions_dict[tag]
 					# print('DEBUGGING: _MsgHandler.handle(), sub=' + repr(sub) + ', sub.event=' + repr(sub.event))
 
 					# firing Python callback functions registered in axel.Event()
@@ -1305,17 +1316,22 @@ class _MessageHandler(object):
 		while not found and loops <= timeout:
 			time.sleep(TIMEOUT_TIMEBASE)
 			loops = loops + 1
-			if self._pending_response_dict[tag]:
-				found = True
-		return self._pending_response_dict.pop(tag)
+			with self._pending_response_lock:
+				if self._pending_response_dict[tag]:
+					found = True
+		with self._pending_response_lock:
+			curr_response = self._pending_response_dict.pop(tag)
+		return curr_response
 
 	def add_subscription(self, sub):
 		tag = sub.get_tag()
-		self._subscriptions_dict[tag] = sub
+		with self._subscriptions_lock:
+			self._subscriptions_dict[tag] = sub
 
 	def del_subscription(self, sub):
 		tag = sub.get_tag()
-		del(self._subscriptions_dict[tag])
+		with self._subscriptions_lock:
+			del(self._subscriptions_dict[tag])
 
 
 	def generate_tag(self):
@@ -1323,7 +1339,8 @@ class _MessageHandler(object):
 		# (see https://docs.python.org/2/library/uuid.html )
 		curr_tag = str(uuid.uuid4())
 
-		self._pending_response_dict[curr_tag] = None
+		with self._pending_response_lock:
+			self._pending_response_dict[curr_tag] = None
 		return curr_tag
 
 
