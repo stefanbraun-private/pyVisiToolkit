@@ -123,7 +123,7 @@ class _DMSCmdGet(object):
 		self.query = {}
 		self.histData = {}
 		self.showExtInfos = None
-		self.tag = msghandler.generate_tag()
+		self.tag = msghandler.prepare_tag()
 
 		for key in kwargs:
 			# parsing "query" object
@@ -201,7 +201,7 @@ class _DMSCmdSet(object):
 		self.path = u'' + path
 		self.value = value
 		self.request = {}
-		self.tag = msghandler.generate_tag()
+		self.tag = msghandler.prepare_tag()
 
 		for key in kwargs:
 			# parsing request options
@@ -246,7 +246,7 @@ class _DMSCmdRen(object):
 		# =>since all fields in "get" object and all it's subobjects are unique, we could handle them in the same loop
 		self.path = u'' + path
 		self.newPath = u'' + newPath
-		self.tag = msghandler.generate_tag()
+		self.tag = msghandler.prepare_tag()
 
 	def as_dict(self):
 		curr_dict = {}
@@ -273,7 +273,7 @@ class _DMSCmdDel(object):
 		# flag "recursive" is optional, default in DMS is False.
 		# Because this is a possible dangerous command we allow explicit sending of False over the wire!
 		self.recursive = recursive
-		self.tag = msghandler.generate_tag()
+		self.tag = msghandler.prepare_tag()
 
 	def as_dict(self):
 		curr_dict = {}
@@ -298,11 +298,11 @@ class _DMSCmdSub(object):
 		# =>since all fields in "get" object and all it's subobjects are unique, we could handle them in the same loop
 		self.path = u'' + path
 		self.query = {}
-		if not u'tag' in kwargs:
-			self.tag = msghandler.generate_tag()
-		else:
+		curr_tag = None
+		if u'tag' in kwargs:
 			# caller wants to reuse existing tag =>DMS will update subscription when path and tag match a current subscription
-			self.tag = kwargs[u'tag']
+			curr_tag = kwargs[u'tag']
+		self.tag = msghandler.prepare_tag(curr_tag=curr_tag)
 
 
 		for key in kwargs:
@@ -356,11 +356,11 @@ class _DMSCmdUnsub(object):
 
 	CMD_TYPE = u'unsubscribe'
 
-	def __init__(self, path, tag):
+	def __init__(self, msghandler, path, tag):
 		# =>because our implementation of subscriptions always use a tag, we have to make tags mandatory
 		# (documentation for "unsubscribe" say "tag" is an optional field)
 		self.path = u'' + path
-		self.tag = tag
+		self.tag = msghandler.prepare_tag(curr_tag=tag)
 
 	def as_dict(self):
 		curr_dict = {}
@@ -1106,9 +1106,14 @@ class _MessageHandler(object):
 				self.__init__()
 		self._curr_response = Current_response()
 
+	# object for "busy-waiting" mechanism in responses
+	class _Response_container(object):
+		def __init__(self):
+			self.isAvailable = threading.Event()
+			self.response_list = []
 
 
-	def dp_get(self, path, timeout=10000, **kwargs):
+	def dp_get(self, path, timeout=10, **kwargs):
 		""" read datapoint value(s) """
 
 		req = _DMSRequest(whois=self._whois_str, user=self._user_str).addCmd(_DMSCmdGet(msghandler=self, path=path, **kwargs))
@@ -1124,7 +1129,7 @@ class _MessageHandler(object):
 			raise Exception('Please report this bug of pyVisiToolkit!')
 
 
-	def dp_set(self, path, value, timeout=10000, **kwargs):
+	def dp_set(self, path, value, timeout=10, **kwargs):
 		""" write datapoint value(s) """
 		# Remarks: datatype in DMS is taken from datatype of "value" (field "type" is optional)
 		# Remarks: datatype STR: 80 chars could be serialized by DMS into Promos.dms file for permament storage.
@@ -1145,7 +1150,7 @@ class _MessageHandler(object):
 			raise Exception('Please report this bug of pyVisiToolkit!')
 
 
-	def dp_del(self, path, recursive, timeout=10000, **kwargs):
+	def dp_del(self, path, recursive, timeout=10, **kwargs):
 		""" delete datapoint(s) """
 
 		req = _DMSRequest(whois=self._whois_str, user=self._user_str).addCmd(
@@ -1162,7 +1167,7 @@ class _MessageHandler(object):
 			raise Exception('Please report this bug of pyVisiToolkit!')
 
 
-	def dp_ren(self, path, newPath, timeout=10000, **kwargs):
+	def dp_ren(self, path, newPath, timeout=10, **kwargs):
 		""" rename datapoint(s) """
 
 		req = _DMSRequest(whois=self._whois_str, user=self._user_str).addCmd(
@@ -1179,7 +1184,7 @@ class _MessageHandler(object):
 			raise Exception('Please report this bug of pyVisiToolkit!')
 
 
-	def dp_sub(self, path, timeout=10000, **kwargs):
+	def dp_sub(self, path, timeout=10, **kwargs):
 		""" subscribe monitoring of datapoints(s) """
 
 		req = _DMSRequest(whois=self._whois_str, user=self._user_str).addCmd(
@@ -1198,11 +1203,11 @@ class _MessageHandler(object):
 
 
 
-	def _dp_unsub(self, path, tag, timeout=10000, **kwargs):
+	def _dp_unsub(self, path, tag, timeout=10, **kwargs):
 		""" unsubscribe monitoring of datapoint(s) """
 		# =>called by Subscription.unsubscribe()
 		req = _DMSRequest(whois=self._whois_str, user=self._user_str).addCmd(
-			_DMSCmdUnsub(path=path, tag=tag))
+			_DMSCmdUnsub(msghandler=self, path=path, tag=tag))
 		self._send_frame(req)
 
 		try:
@@ -1243,14 +1248,16 @@ class _MessageHandler(object):
 								# found a new tag =>save old list and create a new one
 								if self._curr_response.msg_tag and self._curr_response.resp_list:
 									# need to save last responses
-									with self._pending_response_lock:
-										if curr_tag in self._pending_response_dict:
-											if DEBUGGING:
-												print('\tmessage handler: found different tags in response. Storing response for other thread...')
-											self._pending_response_dict[curr_tag] = self._curr_response.resp_list
-										else:
-											if DEBUGGING:
-												print('\tmessage handler: ignoring unexpected response "' + repr(self._curr_response.resp_list) + '"...')
+									if curr_tag in self._pending_response_dict:
+										if DEBUGGING:
+											print('\tmessage handler: found different tags in response. Storing response for other thread...')
+										with self._pending_response_lock:
+											self._pending_response_dict[curr_tag].response_list = self._curr_response.resp_list
+											# inform other thread
+											self._pending_response_dict[curr_tag].isAvailable.set()
+									else:
+										if DEBUGGING:
+											print('\tmessage handler: ignoring unexpected response "' + repr(self._curr_response.resp_list) + '"...')
 								# begin of new response list
 								self._curr_response.msg_tag = curr_tag
 								self._curr_response.resp_list = [resp_cls(**response)]
@@ -1259,11 +1266,14 @@ class _MessageHandler(object):
 							if DEBUGGING:
 								print('\tmessage handler: ignoring untagged response "' + repr(response) + '"...')
 
+
+					# storing collected list for other thread
+					if DEBUGGING:
+						print('\tmessage handler: storing of response for other thread...')
 					with self._pending_response_lock:
-						# storing collected list for other thread
-						if DEBUGGING:
-							print('\tmessage handler: storing of response for other thread...')
-						self._pending_response_dict[curr_tag] = self._curr_response.resp_list
+						self._pending_response_dict[curr_tag].response_list = self._curr_response.resp_list
+						# inform other thread
+						self._pending_response_dict[curr_tag].isAvailable.set()
 		except Exception as ex:
 			print("exception in _MessageHandler.handle(): " + repr(ex))
 
@@ -1310,18 +1320,19 @@ class _MessageHandler(object):
 		self._dmsclient._send_message(req_str)
 
 	def _busy_wait_for_response(self, tag, timeout):
-		# FIXME: can we implement this in a better way?
-		found = False
-		loops = 0
-		while not found and loops <= timeout:
+		while not tag in self._pending_response_dict:
+			# FIXME: hmm, sometimes we have a race condition... Now we do this ugly busy wait loop...
+			# this tag HAS to be in dictionary, or we have a problem...
 			time.sleep(TIMEOUT_TIMEBASE)
-			loops = loops + 1
-			with self._pending_response_lock:
-				if self._pending_response_dict[tag]:
-					found = True
 		with self._pending_response_lock:
-			curr_response = self._pending_response_dict.pop(tag)
-		return curr_response
+			isAvailable = self._pending_response_dict[tag].isAvailable
+		if isAvailable.wait(timeout=timeout):
+			with self._pending_response_lock:
+				curr_container = self._pending_response_dict.pop(tag)
+			return curr_container.response_list
+		else:
+			# no response in given timeframe... Should we return an exception?
+			raise Exception('_MessageHandler.DMS_busy_wait_for_response(): got no response within ' + str(timeout) + ' seconds...')
 
 	def add_subscription(self, sub):
 		tag = sub.get_tag()
@@ -1334,13 +1345,17 @@ class _MessageHandler(object):
 			del(self._subscriptions_dict[tag])
 
 
-	def generate_tag(self):
-		# generating random and nearly unique message tags
-		# (see https://docs.python.org/2/library/uuid.html )
-		curr_tag = str(uuid.uuid4())
+	def prepare_tag(self, curr_tag=None):
+		# register message tag for identification of responses
+		# =>attention: commands "subscribe" and "unsubscribe" need to reuse tag of their subscription!
+
+		if not curr_tag:
+			# generating random and nearly unique message tags
+			# (see https://docs.python.org/2/library/uuid.html )
+			curr_tag = str(uuid.uuid4())
 
 		with self._pending_response_lock:
-			self._pending_response_dict[curr_tag] = None
+			self._pending_response_dict[curr_tag] = _MessageHandler._Response_container()
 		return curr_tag
 
 
