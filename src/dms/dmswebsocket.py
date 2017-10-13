@@ -45,7 +45,7 @@ import axel
 TESTMSG = (u'{ "get": [ {"path":"System:Time"} ] }')
 
 # duration of one time.sleep() in busy-waiting-loops
-TIMEOUT_TIMEBASE = 0.001
+SLEEP_TIMEBASE = 0.001
 
 # according "ProMoS DMS JSON Data Exchange":
 DMS_PORT = 9020             # cleartext HTTP or WebSocket
@@ -58,12 +58,8 @@ DMS_BASEPATH = "/json_data" # default for HTTP and WebSocket
 
 
 
-class _DMSFrame(object):
-	def __init__(self):
-		pass
-
-
-class _DMSRequest(_DMSFrame):
+class _Request(object):
+	""" one JSON request containing DMS commands """
 	def __init__(self, whois, user):
 		self.whois = u'' + whois
 		self.user = u'' + user
@@ -71,7 +67,6 @@ class _DMSRequest(_DMSFrame):
 		# dict of lists, containing all pending commands
 		self._cmd_dict = {}
 		self._cmd_tags_list = []
-		_DMSFrame.__init__(self)
 
 	def addCmd(self, *args):
 		for cmd in args:
@@ -104,14 +99,14 @@ class _DMSRequest(_DMSFrame):
 
 	def __repr__(self):
 		""" developer representation of this object """
-		return u'_DMSRequest(' + repr(self.as_dict()) + u')'
+		return u'_Request(' + repr(self.as_dict()) + u')'
 
 	def __str__(self):
 		return u'' + str(self.as_dict())
 
 
 
-class _DMSCmdGet(object):
+class _CmdGet(object):
 	""" one unique "get" request, parsed from **kwargs """
 
 	CMD_TYPE = u'get'
@@ -187,10 +182,10 @@ class _DMSCmdGet(object):
 		return curr_dict
 
 	def get_type(self):
-		return _DMSCmdGet.CMD_TYPE
+		return _CmdGet.CMD_TYPE
 
 
-class _DMSCmdSet(object):
+class _CmdSet(object):
 	""" one unique "Set" request, parsed from **kwargs """
 
 	CMD_TYPE = u'set'
@@ -232,10 +227,10 @@ class _DMSCmdSet(object):
 		return curr_dict
 
 	def get_type(self):
-		return _DMSCmdSet.CMD_TYPE
+		return _CmdSet.CMD_TYPE
 
 
-class _DMSCmdRen(object):
+class _CmdRen(object):
 	""" one unique "Rename" request, parsed from **kwargs """
 
 	CMD_TYPE = u'rename'
@@ -256,10 +251,10 @@ class _DMSCmdRen(object):
 		return curr_dict
 
 	def get_type(self):
-		return _DMSCmdRen.CMD_TYPE
+		return _CmdRen.CMD_TYPE
 
 
-class _DMSCmdDel(object):
+class _CmdDel(object):
 	""" one unique "Delete" request, parsed from **kwargs """
 
 	CMD_TYPE = u'delete'
@@ -284,11 +279,11 @@ class _DMSCmdDel(object):
 		return curr_dict
 
 	def get_type(self):
-		return _DMSCmdDel.CMD_TYPE
+		return _CmdDel.CMD_TYPE
 
 
 
-class _DMSCmdSub(object):
+class _CmdSub(object):
 	""" one unique "subscribe" request, parsed from **kwargs """
 
 	CMD_TYPE = u'subscribe'
@@ -347,11 +342,11 @@ class _DMSCmdSub(object):
 		return curr_dict
 
 	def get_type(self):
-		return _DMSCmdSub.CMD_TYPE
+		return _CmdSub.CMD_TYPE
 
 
 
-class _DMSCmdUnsub(object):
+class _CmdUnsub(object):
 	""" one unique "unsubscribe" request, parsed from **kwargs """
 
 	CMD_TYPE = u'unsubscribe'
@@ -369,7 +364,7 @@ class _DMSCmdUnsub(object):
 		return curr_dict
 
 	def get_type(self):
-		return _DMSCmdUnsub.CMD_TYPE
+		return _CmdUnsub.CMD_TYPE
 
 
 
@@ -504,7 +499,7 @@ class HistData_compact(collections.Sequence):
 
 
 
-class CmdResponse(object):
+class _Response(object):
 	""" all common response fields """
 
 	# inherit from abstract class "Mapping" for getting dictionary-interface
@@ -523,24 +518,24 @@ class CmdResponse(object):
 
 	def __init__(self, **kwargs):
 		# this variable has to be declared in child class...
-		for field in CmdResponse._fields:
+		for field in _Response._fields:
 			try:
 				self._values_dict[field] = kwargs[field]
 			except KeyError:
 				# something went wrong, a mandatory field is missing... =>set error code
 				print('constructor of CmdResponse(): ERROR: mandatory field "' + field + '" is missing in current response!')
-				self._values_dict[u'code'] = CmdResponse.CODE_ERROR
+				self._values_dict[u'code'] = _Response.CODE_ERROR
 
 		# some sanity checks
-		if not self._values_dict[u'code'] in (CmdResponse.CODE_OK,
-		                                      CmdResponse.CODE_NOPERM,
-		                                      CmdResponse.CODE_NOTFOUND,
-		                                      CmdResponse.CODE_ERROR):
+		if not self._values_dict[u'code'] in (_Response.CODE_OK,
+		                                      _Response.CODE_NOPERM,
+		                                      _Response.CODE_NOTFOUND,
+		                                      _Response.CODE_ERROR):
 			print('constructor of CmdResponse(): ERROR: field "code" in current response contains unknown value "' + repr(self._values_dict[u'code']) + '"!')
 			# FIXME: what should we do if response code is unknown? Perhaps it's an unsupported JSON Data Exchange protocol?
 
 
-class CmdGetResponse(CmdResponse, collections.Mapping):
+class RespGet(_Response, collections.Mapping):
 	_fields = (u'path',
 	           u'value',
 	           u'type',
@@ -565,7 +560,7 @@ class CmdGetResponse(CmdResponse, collections.Mapping):
 
 		self._values_dict = {}
 
-		for field in CmdGetResponse._fields:
+		for field in RespGet._fields:
 			try:
 				if field == u'stamp':
 					# timestamps are ISO 8601 formatted (or "null" after DMS restart or on nodes with type "none")
@@ -597,11 +592,11 @@ class CmdGetResponse(CmdResponse, collections.Mapping):
 			except KeyError:
 				# argument was not in response =>setting default value
 				if DEBUGGING:
-					print('\tDEBUG: CmdGetResponse constructor: field "' + field + '" is not in response.')
+					print('\tDEBUG: RespGet constructor: field "' + field + '" is not in response.')
 				self._values_dict[field] = None
 
 		# init all common fields
-		super(CmdGetResponse, self).__init__(**kwargs)
+		super(RespGet, self).__init__(**kwargs)
 
 
 	def __getitem__(self, key):
@@ -615,13 +610,13 @@ class CmdGetResponse(CmdResponse, collections.Mapping):
 
 	def __repr__(self):
 		""" developer representation of this object """
-		return u'CmdGetResponse(' + repr(self._values_dict) + u')'
+		return u'RespGet(' + repr(self._values_dict) + u')'
 
 	def __str__(self):
 		return u'' + str(self._values_dict)
 
 
-class CmdSetResponse(CmdResponse, collections.Mapping):
+class RespSet(_Response, collections.Mapping):
 	_fields = (u'path',
 	           u'value',
 	           u'type',
@@ -643,7 +638,7 @@ class CmdSetResponse(CmdResponse, collections.Mapping):
 
 		self._values_dict = {}
 
-		for field in CmdSetResponse._fields:
+		for field in RespSet._fields:
 			try:
 				if field == u'stamp':
 					# timestamps are ISO 8601 formatted (or "null" after DMS restart or on nodes with type "none")
@@ -657,11 +652,11 @@ class CmdSetResponse(CmdResponse, collections.Mapping):
 					self._values_dict[field] = kwargs[field]
 			except KeyError:
 				# argument was not in response =>setting default value
-				print('\tDEBUG: CmdSetResponse constructor: field "' + field + '" is not in response.')
+				print('\tDEBUG: RespSet constructor: field "' + field + '" is not in response.')
 				self._values_dict[field] = None
 
 		# init all common fields
-		super(CmdSetResponse, self).__init__(**kwargs)
+		super(RespSet, self).__init__(**kwargs)
 
 
 	def __getitem__(self, key):
@@ -675,13 +670,13 @@ class CmdSetResponse(CmdResponse, collections.Mapping):
 
 	def __repr__(self):
 		""" developer representation of this object """
-		return u'CmdSetResponse(' + repr(self._values_dict) + u')'
+		return u'RespSet(' + repr(self._values_dict) + u')'
 
 	def __str__(self):
 		return u'' + str(self._values_dict)
 
 
-class CmdRenResponse(CmdResponse, collections.Mapping):
+class RespRen(_Response, collections.Mapping):
 	_fields = (u'path',
 	           u'newPath',
 	           u'message',
@@ -701,17 +696,17 @@ class CmdRenResponse(CmdResponse, collections.Mapping):
 
 		self._values_dict = {}
 
-		for field in CmdRenResponse._fields:
+		for field in RespRen._fields:
 			try:
 				# default: no special treatment
 				self._values_dict[field] = kwargs[field]
 			except KeyError:
 				# argument was not in response =>setting default value
-				print('\tDEBUG: CmdRenResponse constructor: field "' + field + '" is not in response.')
+				print('\tDEBUG: RespRen constructor: field "' + field + '" is not in response.')
 				self._values_dict[field] = None
 
 		# init all common fields
-		super(CmdRenResponse, self).__init__(**kwargs)
+		super(RespRen, self).__init__(**kwargs)
 
 
 	def __getitem__(self, key):
@@ -725,13 +720,13 @@ class CmdRenResponse(CmdResponse, collections.Mapping):
 
 	def __repr__(self):
 		""" developer representation of this object """
-		return u'CmdRenResponse(' + repr(self._values_dict) + u')'
+		return u'RespRen(' + repr(self._values_dict) + u')'
 
 	def __str__(self):
 		return u'' + str(self._values_dict)
 
 
-class CmdDelResponse(CmdResponse, collections.Mapping):
+class RespDel(_Response, collections.Mapping):
 	_fields = (u'path',
 	           u'message',
 	           u'tag')
@@ -750,17 +745,17 @@ class CmdDelResponse(CmdResponse, collections.Mapping):
 
 		self._values_dict = {}
 
-		for field in CmdDelResponse._fields:
+		for field in RespDel._fields:
 			try:
 				# default: no special treatment
 				self._values_dict[field] = kwargs[field]
 			except KeyError:
 				# argument was not in response =>setting default value
-				print('\tDEBUG: CmdDelResponse constructor: field "' + field + '" is not in response.')
+				print('\tDEBUG: RespDel constructor: field "' + field + '" is not in response.')
 				self._values_dict[field] = None
 
 		# init all common fields
-		super(CmdDelResponse, self).__init__(**kwargs)
+		super(RespDel, self).__init__(**kwargs)
 
 
 	def __getitem__(self, key):
@@ -774,14 +769,14 @@ class CmdDelResponse(CmdResponse, collections.Mapping):
 
 	def __repr__(self):
 		""" developer representation of this object """
-		return u'CmdDelResponse(' + repr(self._values_dict) + u')'
+		return u'RespDel(' + repr(self._values_dict) + u')'
 
 	def __str__(self):
 		return u'' + str(self._values_dict)
 
 
 
-class CmdSubResponse(CmdResponse, collections.Mapping):
+class RespSub(_Response, collections.Mapping):
 	_fields = (u'path',
 	           u'value',
 	           u'type',
@@ -812,7 +807,7 @@ class CmdSubResponse(CmdResponse, collections.Mapping):
 
 		self._values_dict = {}
 
-		for field in CmdSubResponse._fields:
+		for field in RespSub._fields:
 			try:
 				if field == u'stamp':
 					# timestamps are ISO 8601 formatted (or "null" after DMS restart or on nodes with type "none")
@@ -826,24 +821,24 @@ class CmdSubResponse(CmdResponse, collections.Mapping):
 					self._values_dict[field] = kwargs[field]
 			except KeyError:
 				# argument was not in response =>setting default value
-				print('\tDEBUG: CmdSubResponse constructor: field "' + field + '" is not in response.')
+				print('\tDEBUG: RespSub constructor: field "' + field + '" is not in response.')
 				self._values_dict[field] = None
 
 		# handle optional "query" object
 		# =>we insert an additional key "query" as flag if query was used.
 		# =>the fields have unique names, so we store them flat in our dictionary.
 		self._values_dict[u'query'] = u'query' in kwargs
-		for field in CmdSubResponse._opt_fields:
+		for field in RespSub._opt_fields:
 			try:
 				# default: no special treatment
 				self._values_dict[field] = kwargs[u'query'][field]
 			except KeyError:
 				# argument was not in response =>setting default value
-				print('\tDEBUG: CmdSubResponse constructor: field "' + field + '" is not in response.')
+				print('\tDEBUG: RespSub constructor: field "' + field + '" is not in response.')
 				self._values_dict[field] = None
 
 		# init all common fields
-		super(CmdSubResponse, self).__init__(**kwargs)
+		super(RespSub, self).__init__(**kwargs)
 
 
 	def __getitem__(self, key):
@@ -857,13 +852,13 @@ class CmdSubResponse(CmdResponse, collections.Mapping):
 
 	def __repr__(self):
 		""" developer representation of this object """
-		return u'CmdSubResponse(' + repr(self._values_dict) + u')'
+		return u'RespSub(' + repr(self._values_dict) + u')'
 
 	def __str__(self):
 		return u'' + str(self._values_dict)
 
 
-class CmdUnsubResponse(CmdResponse, collections.Mapping):
+class RespUnsub(_Response, collections.Mapping):
 	_fields = (u'path',
 	           u'value',
 	           u'type',
@@ -894,7 +889,7 @@ class CmdUnsubResponse(CmdResponse, collections.Mapping):
 
 		self._values_dict = {}
 
-		for field in CmdUnsubResponse._fields:
+		for field in RespUnsub._fields:
 			try:
 				if field == u'stamp':
 					# timestamps are ISO 8601 formatted (or "null" after DMS restart or on nodes with type "none")
@@ -908,24 +903,24 @@ class CmdUnsubResponse(CmdResponse, collections.Mapping):
 					self._values_dict[field] = kwargs[field]
 			except KeyError:
 				# argument was not in response =>setting default value
-				print('\tDEBUG: CmdUnsubResponse constructor: field "' + field + '" is not in response.')
+				print('\tDEBUG: RespUnsub constructor: field "' + field + '" is not in response.')
 				self._values_dict[field] = None
 
 		# handle optional "query" object
 		# =>we insert an additional key "query" as flag if query was used.
 		# =>the fields have unique names, so we store them flat in our dictionary.
 		self._values_dict[u'query'] = u'query' in kwargs
-		for field in CmdUnsubResponse._opt_fields:
+		for field in RespUnsub._opt_fields:
 			try:
 				# default: no special treatment
 				self._values_dict[field] = kwargs[u'query'][field]
 			except KeyError:
 				# argument was not in response =>setting default value
-				print('\tDEBUG: CmdUnsubResponse constructor: field "' + field + '" is not in response.')
+				print('\tDEBUG: RespUnsub constructor: field "' + field + '" is not in response.')
 				self._values_dict[field] = None
 
 		# init all common fields
-		super(CmdUnsubResponse, self).__init__(**kwargs)
+		super(RespUnsub, self).__init__(**kwargs)
 
 
 	def __getitem__(self, key):
@@ -939,7 +934,7 @@ class CmdUnsubResponse(CmdResponse, collections.Mapping):
 
 	def __repr__(self):
 		""" developer representation of this object """
-		return u'CmdUnsubResponse(' + repr(self._values_dict) + u')'
+		return u'RespUnsub(' + repr(self._values_dict) + u')'
 
 	def __str__(self):
 		return u'' + str(self._values_dict)
@@ -988,7 +983,7 @@ class Subscription(axel.Event):
 		self.unsubscribe()
 
 
-class CmdEvent(collections.Mapping):
+class DMSEvent(collections.Mapping):
 	# string constants
 	CODE_CHANGE = u'onChange'
 	CODE_SET = u'onSet'
@@ -1021,7 +1016,7 @@ class CmdEvent(collections.Mapping):
 
 		self._values_dict = {}
 
-		for field in CmdEvent._fields:
+		for field in DMSEvent._fields:
 			try:
 				if field == u'stamp':
 					# timestamps are ISO 8601 formatted (or "null" after DMS restart or on nodes with type "none")
@@ -1038,17 +1033,17 @@ class CmdEvent(collections.Mapping):
 					self._values_dict[field] = kwargs[field]
 			except KeyError:
 				# argument was not in response =>setting default value
-				print('\tDEBUG: CmdEvent constructor: field "' + field + '" is not in response.')
+				print('\tDEBUG: DMSEvent constructor: field "' + field + '" is not in response.')
 				self._values_dict[field] = None
 
 		# sanity check:
-		if not self._values_dict[u'code'] in (CmdEvent.CODE_CHANGE,
-		                                      CmdEvent.CODE_SET,
-		                                      CmdEvent.CODE_CREATE,
-		                                      CmdEvent.CODE_RENAME,
-		                                      CmdEvent.CODE_DELETE):
+		if not self._values_dict[u'code'] in (DMSEvent.CODE_CHANGE,
+		                                      DMSEvent.CODE_SET,
+		                                      DMSEvent.CODE_CREATE,
+		                                      DMSEvent.CODE_RENAME,
+		                                      DMSEvent.CODE_DELETE):
 					print(
-						'constructor of CmdEvent(): ERROR: field "code" in current response contains unknown value "' + repr(
+						'constructor of DMSEvent(): ERROR: field "code" in current response contains unknown value "' + repr(
 							self._values_dict[u'code']) + '"!')
 
 	def __getitem__(self, key):
@@ -1062,7 +1057,7 @@ class CmdEvent(collections.Mapping):
 
 	def __repr__(self):
 		""" developer representation of this object """
-		return u'CmdEvent(' + repr(self._values_dict) + u')'
+		return u'DMSEvent(' + repr(self._values_dict) + u')'
 
 	def __str__(self):
 		return u'' + str(self._values_dict)
@@ -1116,7 +1111,7 @@ class _MessageHandler(object):
 	def dp_get(self, path, timeout=10, **kwargs):
 		""" read datapoint value(s) """
 
-		req = _DMSRequest(whois=self._whois_str, user=self._user_str).addCmd(_DMSCmdGet(msghandler=self, path=path, **kwargs))
+		req = _Request(whois=self._whois_str, user=self._user_str).addCmd(_CmdGet(msghandler=self, path=path, **kwargs))
 		self._send_frame(req)
 
 		try:
@@ -1136,8 +1131,8 @@ class _MessageHandler(object):
 		#                        =>transmission of 64kByte text is possible (total size of JSON request),
 		#                          this text is volatile in RAM of DMS.
 
-		req = _DMSRequest(whois=self._whois_str, user=self._user_str).addCmd(
-			_DMSCmdSet(msghandler=self, path=path, value=value, **kwargs))
+		req = _Request(whois=self._whois_str, user=self._user_str).addCmd(
+			_CmdSet(msghandler=self, path=path, value=value, **kwargs))
 		self._send_frame(req)
 
 		try:
@@ -1153,8 +1148,8 @@ class _MessageHandler(object):
 	def dp_del(self, path, recursive, timeout=10, **kwargs):
 		""" delete datapoint(s) """
 
-		req = _DMSRequest(whois=self._whois_str, user=self._user_str).addCmd(
-			_DMSCmdDel(msghandler=self, path=path, recursive=recursive, **kwargs))
+		req = _Request(whois=self._whois_str, user=self._user_str).addCmd(
+			_CmdDel(msghandler=self, path=path, recursive=recursive, **kwargs))
 		self._send_frame(req)
 
 		try:
@@ -1170,8 +1165,8 @@ class _MessageHandler(object):
 	def dp_ren(self, path, newPath, timeout=10, **kwargs):
 		""" rename datapoint(s) """
 
-		req = _DMSRequest(whois=self._whois_str, user=self._user_str).addCmd(
-			_DMSCmdRen(msghandler=self, path=path, newPath=newPath, **kwargs))
+		req = _Request(whois=self._whois_str, user=self._user_str).addCmd(
+			_CmdRen(msghandler=self, path=path, newPath=newPath, **kwargs))
 		self._send_frame(req)
 
 		try:
@@ -1187,8 +1182,8 @@ class _MessageHandler(object):
 	def dp_sub(self, path, timeout=10, **kwargs):
 		""" subscribe monitoring of datapoints(s) """
 
-		req = _DMSRequest(whois=self._whois_str, user=self._user_str).addCmd(
-			_DMSCmdSub(msghandler=self, path=path, **kwargs))
+		req = _Request(whois=self._whois_str, user=self._user_str).addCmd(
+			_CmdSub(msghandler=self, path=path, **kwargs))
 		self._send_frame(req)
 
 		try:
@@ -1206,8 +1201,8 @@ class _MessageHandler(object):
 	def _dp_unsub(self, path, tag, timeout=10, **kwargs):
 		""" unsubscribe monitoring of datapoint(s) """
 		# =>called by Subscription.unsubscribe()
-		req = _DMSRequest(whois=self._whois_str, user=self._user_str).addCmd(
-			_DMSCmdUnsub(msghandler=self, path=path, tag=tag))
+		req = _Request(whois=self._whois_str, user=self._user_str).addCmd(
+			_CmdUnsub(msghandler=self, path=path, tag=tag))
 		self._send_frame(req)
 
 		try:
@@ -1225,12 +1220,12 @@ class _MessageHandler(object):
 
 		try:
 			# message handler
-			for resp_type, resp_cls in [(u'get',    CmdGetResponse),
-			                            (u'set',    CmdSetResponse),
-			                            (u'rename', CmdRenResponse),
-			                            (u'delete', CmdDelResponse),
-			                            (u'subscribe', CmdSubResponse),
-			                            (u'unsubscribe', CmdUnsubResponse)]:
+			for resp_type, resp_cls in [(u'get', RespGet),
+			                            (u'set', RespSet),
+			                            (u'rename', RespRen),
+			                            (u'delete', RespDel),
+			                            (u'subscribe', RespSub),
+			                            (u'unsubscribe', RespUnsub)]:
 				if resp_type in payload_dict:
 					# handling responses to command
 
@@ -1283,7 +1278,7 @@ class _MessageHandler(object):
 			for event in payload_dict[u'event']:
 				# trigger Python event
 				try:
-					event_obj = CmdEvent(**event)
+					event_obj = DMSEvent(**event)
 					tag = event_obj[u'tag']
 					with self._subscriptions_lock:
 						sub = self._subscriptions_dict[tag]
@@ -1323,7 +1318,7 @@ class _MessageHandler(object):
 		while not tag in self._pending_response_dict:
 			# FIXME: hmm, sometimes we have a race condition... Now we do this ugly busy wait loop...
 			# this tag HAS to be in dictionary, or we have a problem...
-			time.sleep(TIMEOUT_TIMEBASE)
+			time.sleep(SLEEP_TIMEBASE)
 		with self._pending_response_lock:
 			isAvailable = self._pending_response_dict[tag].isAvailable
 		if isAvailable.wait(timeout=timeout):
@@ -1465,7 +1460,7 @@ if __name__ == '__main__':
 	# 	print('sending TESTMSG...')
 	# 	myClient._send_message(TESTMSG)
 
-	test_set = set([11])
+	test_set = set([1])
 
 	if 1 in test_set:
 		print('\nTesting creation of Request command:')
