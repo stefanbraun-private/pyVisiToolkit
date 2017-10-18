@@ -54,7 +54,55 @@ DMS_BASEPATH = "/json_data" # default for HTTP and WebSocket
 
 
 
+class _Mydict(collections.Mapping):
+	""" dictionary-like superclass """
 
+	# inherit from abstract class "Mapping" for getting dictionary-interface
+	# https://stackoverflow.com/questions/19775685/how-to-correctly-implement-the-mapping-protocol-in-python
+	# https://docs.python.org/2.7/library/collections.html#collections.MutableMapping
+	# (then the options are similar to Tkinter widgets: http://effbot.org/tkinterbook/tkinter-widget-configuration.htm )
+
+	def __init__(self, **kwargs):
+		self._values_dict = {}
+
+	def __getitem__(self, key):
+		return self._values_dict[key]
+
+	def __iter__(self):
+		return iter(self._values_dict)
+
+	def __len__(self):
+		return len(self._values_dict)
+
+	def __repr__(self):
+		""" developer representation of this object """
+		return u'_Mydict(' + repr(self._values_dict) + u')'
+
+	def __str__(self):
+		return u'' + str(self._values_dict)
+
+
+class _Mylist(collections.Sequence):
+	""" list-like superclass """
+	# implementing abstract class "Sequence" for getting list-like object
+	# https://docs.python.org/2/library/collections.html#collections.Sequence
+
+	def __init__(self):
+		# internal storage: list
+		self._values_list = []
+
+	def __getitem__(self, idx):
+		return self._values_list[idx]
+
+	def __len__(self):
+		return len(self._values_list)
+
+	def __repr__(self):
+		""" developer representation of this object """
+		return u'_Mylist(' + repr(self._values_list) + u')'
+
+	def __str__(self):
+		return u'' + str(self._values_list)
 
 
 
@@ -106,6 +154,100 @@ class _Request(object):
 
 
 
+class Query(_Mydict):
+	""" optional component in "get" request """
+
+	def __init__(self, **kwargs):
+		super(Query, self).__init__()
+
+		for key in kwargs.keys():
+			val = None
+			if key in [u'regExPath',
+			           u'regExValue',
+			           u'regExStamp',
+			           u'isType']:
+				# handle as string
+				val = u'' + kwargs.pop(key)
+			elif key in [u'hasHistData',
+			             u'hasChangelog',
+			             u'hasAlarmData']:
+				# handle as boolean
+				val = bool(kwargs.pop(key))
+			elif key == u'maxDepth':
+				val = int(kwargs.pop(key))
+			else:
+				raise ValueError('parameter "' + repr(key) + '" is illegal in "Query" object')
+			self._values_dict[key] = val
+
+	def __repr__(self):
+		""" developer representation of this object """
+		return u'Query(' + repr(self._values_dict) + u')'
+
+
+class HistData(_Mydict):
+	""" optional component in "get" request """
+
+	def __init__(self, start, **kwargs):
+		super(HistData, self).__init__()
+
+		# convert datetime.datetime object to ISO 8601 format
+		val = None
+		try:
+			val = u'' + kwargs.pop(u'start').isoformat()
+		except AttributeError:
+			# now we assume it's already a string
+			val = u'' + kwargs.pop(u'start')
+		self._values_dict[u'start'] = val
+
+
+		for key in kwargs.keys():
+			val = None
+			if key == u'end':
+				# convert datetime.datetime object to ISO 8601 format
+				try:
+					val = u'' + kwargs.pop(key).isoformat()
+				except AttributeError:
+					# now we assume it's already a string
+					val = u'' + kwargs.pop(key)
+			elif key == u'interval':
+				# expecting number, conversion to int
+				val = int(kwargs.pop(key))
+			elif key == u'format':
+				# expecting string
+				# FIXME: should we check for correct parameter? Or should we send it anyway to DMS?
+				val = u'' + kwargs.pop(key)
+			else:
+				raise ValueError('parameter "' + repr(key) + '" is illegal in "HistData" object')
+			self._values_dict[key] = val
+
+	def __repr__(self):
+		""" developer representation of this object """
+		return u'HistData(' + repr(self._values_dict) + u')'
+
+
+class Changelog(_Mydict):
+	""" optional component in "get" request """
+
+	def __init__(self, start, end=None):
+		super(Changelog, self).__init__()
+
+		for key in [start, end]:
+			if key != None:
+				# convert datetime.datetime object to ISO 8601 format
+				val = None
+				try:
+					val = u'' + key.isoformat()
+				except AttributeError:
+					# now we assume it's already a string
+					val = u'' + key
+				self._values_dict[key] = val
+
+	def __repr__(self):
+		""" developer representation of this object """
+		return u'Changelog(' + repr(self._values_dict) + u')'
+
+
+
 class _CmdGet(object):
 	""" one unique "get" request, parsed from **kwargs """
 
@@ -113,60 +255,29 @@ class _CmdGet(object):
 
 	def __init__(self, msghandler, path, **kwargs):
 		# parsing of kwargs: help from https://stackoverflow.com/questions/5624912/kwargs-parsing-best-practice
-		# =>since all fields in "get" object and all it's subobjects are unique, we could handle them in the same loop
+		# deleting keys from kwargs while iteration over it
+		# https://stackoverflow.com/questions/5384914/how-to-delete-items-from-a-dictionary-while-iterating-over-it
 		self.path = u'' + path
-		self.query = {}
-		self.histData = {}
+		self.query = None
+		self.histData = None
+		self.changelog = None
 		self.showExtInfos = None
 		self.tag = msghandler.prepare_tag()
 
-		for key in kwargs:
-			# parsing "query" object
-			val = None
-			if key == u'regExPath':
-				val = u'' + kwargs[key]
-			elif key == u'regExValue':
-				val = u'' + kwargs[key]
-			elif key == u'regExStamp':
-				val = u'' + kwargs[key]
-			elif key == u'isType':
-				val = u'' + kwargs[key]
-			elif key == u'hasHistData':
-				val = bool(kwargs[key])
-			elif key == u'hasAlarmData':
-				val = bool(kwargs[key])
-			elif key == u'hasProtocolData':
-				val = bool(kwargs[key])
-			elif key == u'maxDepth':
-				val = int(kwargs[key])
-
-			if val:
-				self.query[key] = val
-
-			# parsing "histData" object
-			val = None
-			if key == u'start' or key == u'end':
-				# convert datetime.datetime object to ISO 8601 format
-				try:
-					val = u'' + kwargs[key].isoformat()
-				except AttributeError:
-					# now we assume it's already a string
-					val = u'' + kwargs[key]
-			if key == u'interval':
-				val = int(kwargs[key])
-			if key == u'format':
-				val = u'' + kwargs[key]
-
-			if val:
-				self.histData[key] = val
-
-			# parsing properties
+		for key in kwargs.keys():
 			if key == u'showExtInfos':
-				self.showExtInfos = bool(kwargs[key])
-
-		# checking mandatory fields
-		#assert self.path != u'', u'"path" property is mandatory!'  # is null-path allowed?!?
-		assert self.histData == {} or u'start' in self.histData, u'field "start" is mandatory when object "histData" is used!'
+				self.showExtInfos = bool(kwargs.pop(key))
+			elif key == u'query':
+				self.query = kwargs.pop(key)
+				assert type(self.query) is Query, u'field "query" expects "Query" object, got "' + str(type(self.query)) + u'" instead'
+			elif key == u'histData':
+				self.histData = kwargs.pop(key)
+				assert type(self.histData) is HistData, u'field "histData" expects "HistData" object, got "' + str(type(self.histData)) + u'" instead'
+			elif key == u'changelog':
+				self.changelog = kwargs.pop(key)
+				assert type(self.changelog) is Changelog, u'field "changelog" expects "Changelog" object, got "' + str(type(self.histData)) + u'" instead'
+			else:
+				raise ValueError('field "' + repr(key) + '" is illegal in "get" request')
 
 
 	def as_dict(self):
@@ -178,6 +289,8 @@ class _CmdGet(object):
 			curr_dict[u'query'] = self.query
 		if self.histData:
 			curr_dict[u'histData'] = self.histData
+		if self.changelog:
+			curr_dict[u'changelog'] = self.changelog
 		curr_dict[u'tag'] = self.tag
 		return curr_dict
 
@@ -368,9 +481,8 @@ class _CmdUnsub(object):
 
 
 
-class ExtInfos(collections.Mapping):
+class ExtInfos(_Mydict):
 	""" optional extended infos about datapoint """
-	# inherit from abstract "Mapping" for getting dictionary-API
 
 	_fields = (u'template',
 	           u'name',
@@ -378,7 +490,7 @@ class ExtInfos(collections.Mapping):
 	           u'unit',
 	           u'comment')
 	def __init__(self, **kwargs):
-		self._values_dict = {}
+		super(ExtInfos, self).__init__()
 
 		for field in ExtInfos._fields:
 			try:
@@ -389,35 +501,22 @@ class ExtInfos(collections.Mapping):
 				# argument was not in response =>setting default value
 				self._values_dict[field] = None
 
-		def __getitem__(self, key):
-			return self._values_dict[key]
-
-		def __iter__(self):
-			return iter(self._values_dict)
-
-		def __len__(self):
-			return len(self._values_dict)
-
-		def __repr__(self):
-			""" developer representation of this object """
-			return u'ExtInfos(' + repr(self._values_dict) + u')'
-
-		def __str__(self):
-			return u'' + str(self._values_dict)
+	def __repr__(self):
+		""" developer representation of this object """
+		return u'ExtInfos(' + repr(self._values_dict) + u')'
 
 
-class HistData_detail(collections.Sequence):
+class HistData_detail(_Mylist):
 	""" optional history data in detailed format """
-	# implementing abstract class "Sequence" for getting list-like object
-	# https://docs.python.org/2/library/collections.html#collections.Sequence
+
 	_fields = (u'stamp',
 	           u'value',
 	           u'state',
 	           u'rec')
 
 	def __init__(self, histobj_list):
-		# internal storage: list of dictionaries with _fields as keys
-		self._values_list = []
+		super(HistData_detail, self).__init__()
+		# internal storage: list of dictionarys
 
 		for histobj in histobj_list:
 			curr_dict = {}
@@ -444,26 +543,16 @@ class HistData_detail(collections.Sequence):
 			self._values_list.append(curr_dict)
 			curr_dict = {}
 
-
-	def __getitem__(self, idx):
-		return self._values_list[idx]
-
-	def __len__(self):
-		return len(self._values_list)
-
 	def __repr__(self):
 		""" developer representation of this object """
 		return u'HistData_detail(' + repr(self._values_list) + u')'
 
-	def __str__(self):
-		return u'' + str(self._values_list)
 
-
-class HistData_compact(collections.Sequence):
+class HistData_compact(_Mylist):
 	""" optional history data in compact format """
-	# implementing abstract class "Sequence" for getting list-like object
-	# https://docs.python.org/2/library/collections.html#collections.Sequence
+
 	def __init__(self, histobj_list):
+		super(HistData_compact, self).__init__()
 		# internal storage: list of tuples (timestamp, value)
 		self._values_list = []
 
@@ -484,19 +573,9 @@ class HistData_compact(collections.Sequence):
 			curr_tuple = (stamp, value)
 			self._values_list.append(curr_tuple)
 
-	def __getitem__(self, idx):
-		return self._values_list[idx]
-
-	def __len__(self):
-		return len(self._values_list)
-
 	def __repr__(self):
 		""" developer representation of this object """
 		return u'HistData_compact(' + repr(self._values_list) + u')'
-
-	def __str__(self):
-		return u'' + str(self._values_list)
-
 
 
 class _Response(object):
@@ -535,7 +614,7 @@ class _Response(object):
 			# FIXME: what should we do if response code is unknown? Perhaps it's an unsupported JSON Data Exchange protocol?
 
 
-class RespGet(_Response, collections.Mapping):
+class RespGet(_Mydict, _Response):
 	_fields = (u'path',
 	           u'value',
 	           u'type',
@@ -547,18 +626,7 @@ class RespGet(_Response, collections.Mapping):
 	           u'tag')
 
 	def __init__(self, **kwargs):
-		# better idea: do ducktyping without type checking,
-		# inherit from abstract class "Mapping" for getting dictionary-interface
-		# https://stackoverflow.com/questions/19775685/how-to-correctly-implement-the-mapping-protocol-in-python
-		# https://docs.python.org/2.7/library/collections.html#collections.MutableMapping
-		# (then the options are similar to Tkinter widgets: http://effbot.org/tkinterbook/tkinter-widget-configuration.htm )
-		#
-		#
-		## set all keyword arguments as instance attribut
-		## help from https://stackoverflow.com/questions/8187082/how-can-you-set-class-attributes-from-variable-arguments-kwargs-in-python
-		#self.__dict__.update(kwargs)
-
-		self._values_dict = {}
+		super(RespGet, self).__init__()
 
 		for field in RespGet._fields:
 			try:
@@ -586,6 +654,12 @@ class RespGet(_Response, collections.Mapping):
 					else:
 						# histData is an empty list, we have no trenddata...
 						self._values_dict[field] = []
+				elif field == u'changelog':
+					if kwargs[field]:
+						# parse response as "protocol" or "alarm" format
+						# =>checking first JSON-object if it contains "state" for choosing right parsing
+						# FIXME: do similar as in parsing "histData" (=>implement two classes)
+						raise NotImplementedError('"changelog" is not yet implemented')
 				else:
 					# default: no special treatment
 					self._values_dict[field] = kwargs[field]
@@ -596,27 +670,15 @@ class RespGet(_Response, collections.Mapping):
 				self._values_dict[field] = None
 
 		# init all common fields
-		super(RespGet, self).__init__(**kwargs)
-
-
-	def __getitem__(self, key):
-		return self._values_dict[key]
-
-	def __iter__(self):
-		return iter(self._values_dict)
-
-	def __len__(self):
-		return len(self._values_dict)
+		# (explicit calling _Response's constructor, because "super" would call "_Mydict"...)
+		_Response.__init__(self, **kwargs)
 
 	def __repr__(self):
 		""" developer representation of this object """
 		return u'RespGet(' + repr(self._values_dict) + u')'
 
-	def __str__(self):
-		return u'' + str(self._values_dict)
 
-
-class RespSet(_Response, collections.Mapping):
+class RespSet(_Mydict, _Response):
 	_fields = (u'path',
 	           u'value',
 	           u'type',
@@ -625,18 +687,7 @@ class RespSet(_Response, collections.Mapping):
 	           u'tag')
 
 	def __init__(self, **kwargs):
-		# better idea: do ducktyping without type checking,
-		# inherit from abstract class "Mapping" for getting dictionary-interface
-		# https://stackoverflow.com/questions/19775685/how-to-correctly-implement-the-mapping-protocol-in-python
-		# https://docs.python.org/2.7/library/collections.html#collections.MutableMapping
-		# (then the options are similar to Tkinter widgets: http://effbot.org/tkinterbook/tkinter-widget-configuration.htm )
-		#
-		#
-		## set all keyword arguments as instance attribut
-		## help from https://stackoverflow.com/questions/8187082/how-can-you-set-class-attributes-from-variable-arguments-kwargs-in-python
-		#self.__dict__.update(kwargs)
-
-		self._values_dict = {}
+		super(RespSet, self).__init__()
 
 		for field in RespSet._fields:
 			try:
@@ -656,45 +707,22 @@ class RespSet(_Response, collections.Mapping):
 				self._values_dict[field] = None
 
 		# init all common fields
-		super(RespSet, self).__init__(**kwargs)
-
-
-	def __getitem__(self, key):
-		return self._values_dict[key]
-
-	def __iter__(self):
-		return iter(self._values_dict)
-
-	def __len__(self):
-		return len(self._values_dict)
+		# (explicit calling _Response's constructor, because "super" would call "_Mydict"...)
+		_Response.__init__(self, **kwargs)
 
 	def __repr__(self):
 		""" developer representation of this object """
 		return u'RespSet(' + repr(self._values_dict) + u')'
 
-	def __str__(self):
-		return u'' + str(self._values_dict)
 
-
-class RespRen(_Response, collections.Mapping):
+class RespRen(_Mydict, _Response):
 	_fields = (u'path',
 	           u'newPath',
 	           u'message',
 	           u'tag')
 
 	def __init__(self, **kwargs):
-		# better idea: do ducktyping without type checking,
-		# inherit from abstract class "Mapping" for getting dictionary-interface
-		# https://stackoverflow.com/questions/19775685/how-to-correctly-implement-the-mapping-protocol-in-python
-		# https://docs.python.org/2.7/library/collections.html#collections.MutableMapping
-		# (then the options are similar to Tkinter widgets: http://effbot.org/tkinterbook/tkinter-widget-configuration.htm )
-		#
-		#
-		## set all keyword arguments as instance attribut
-		## help from https://stackoverflow.com/questions/8187082/how-can-you-set-class-attributes-from-variable-arguments-kwargs-in-python
-		#self.__dict__.update(kwargs)
-
-		self._values_dict = {}
+		super(RespRen, self).__init__()
 
 		for field in RespRen._fields:
 			try:
@@ -706,44 +734,21 @@ class RespRen(_Response, collections.Mapping):
 				self._values_dict[field] = None
 
 		# init all common fields
-		super(RespRen, self).__init__(**kwargs)
-
-
-	def __getitem__(self, key):
-		return self._values_dict[key]
-
-	def __iter__(self):
-		return iter(self._values_dict)
-
-	def __len__(self):
-		return len(self._values_dict)
+		# (explicit calling _Response's constructor, because "super" would call "_Mydict"...)
+		_Response.__init__(self, **kwargs)
 
 	def __repr__(self):
 		""" developer representation of this object """
 		return u'RespRen(' + repr(self._values_dict) + u')'
 
-	def __str__(self):
-		return u'' + str(self._values_dict)
 
-
-class RespDel(_Response, collections.Mapping):
+class RespDel(_Mydict, _Response):
 	_fields = (u'path',
 	           u'message',
 	           u'tag')
 
 	def __init__(self, **kwargs):
-		# better idea: do ducktyping without type checking,
-		# inherit from abstract class "Mapping" for getting dictionary-interface
-		# https://stackoverflow.com/questions/19775685/how-to-correctly-implement-the-mapping-protocol-in-python
-		# https://docs.python.org/2.7/library/collections.html#collections.MutableMapping
-		# (then the options are similar to Tkinter widgets: http://effbot.org/tkinterbook/tkinter-widget-configuration.htm )
-		#
-		#
-		## set all keyword arguments as instance attribut
-		## help from https://stackoverflow.com/questions/8187082/how-can-you-set-class-attributes-from-variable-arguments-kwargs-in-python
-		#self.__dict__.update(kwargs)
-
-		self._values_dict = {}
+		super(RespDel, self).__init__()
 
 		for field in RespDel._fields:
 			try:
@@ -755,28 +760,16 @@ class RespDel(_Response, collections.Mapping):
 				self._values_dict[field] = None
 
 		# init all common fields
-		super(RespDel, self).__init__(**kwargs)
-
-
-	def __getitem__(self, key):
-		return self._values_dict[key]
-
-	def __iter__(self):
-		return iter(self._values_dict)
-
-	def __len__(self):
-		return len(self._values_dict)
+		# (explicit calling _Response's constructor, because "super" would call "_Mydict"...)
+		_Response.__init__(self, **kwargs)
 
 	def __repr__(self):
 		""" developer representation of this object """
 		return u'RespDel(' + repr(self._values_dict) + u')'
 
-	def __str__(self):
-		return u'' + str(self._values_dict)
 
 
-
-class RespSub(_Response, collections.Mapping):
+class RespSub(_Mydict, _Response):
 	_fields = (u'path',
 	           u'value',
 	           u'type',
@@ -794,18 +787,7 @@ class RespSub(_Response, collections.Mapping):
 	               u'maxDepth')
 
 	def __init__(self, **kwargs):
-		# better idea: do ducktyping without type checking,
-		# inherit from abstract class "Mapping" for getting dictionary-interface
-		# https://stackoverflow.com/questions/19775685/how-to-correctly-implement-the-mapping-protocol-in-python
-		# https://docs.python.org/2.7/library/collections.html#collections.MutableMapping
-		# (then the options are similar to Tkinter widgets: http://effbot.org/tkinterbook/tkinter-widget-configuration.htm )
-		#
-		#
-		## set all keyword arguments as instance attribut
-		## help from https://stackoverflow.com/questions/8187082/how-can-you-set-class-attributes-from-variable-arguments-kwargs-in-python
-		#self.__dict__.update(kwargs)
-
-		self._values_dict = {}
+		super(RespSub, self).__init__()
 
 		for field in RespSub._fields:
 			try:
@@ -838,27 +820,15 @@ class RespSub(_Response, collections.Mapping):
 				self._values_dict[field] = None
 
 		# init all common fields
-		super(RespSub, self).__init__(**kwargs)
-
-
-	def __getitem__(self, key):
-		return self._values_dict[key]
-
-	def __iter__(self):
-		return iter(self._values_dict)
-
-	def __len__(self):
-		return len(self._values_dict)
+		# (explicit calling _Response's constructor, because "super" would call "_Mydict"...)
+		_Response.__init__(self, **kwargs)
 
 	def __repr__(self):
 		""" developer representation of this object """
 		return u'RespSub(' + repr(self._values_dict) + u')'
 
-	def __str__(self):
-		return u'' + str(self._values_dict)
 
-
-class RespUnsub(_Response, collections.Mapping):
+class RespUnsub(_Mydict, _Response):
 	_fields = (u'path',
 	           u'value',
 	           u'type',
@@ -876,18 +846,7 @@ class RespUnsub(_Response, collections.Mapping):
 	               u'maxDepth')
 
 	def __init__(self, **kwargs):
-		# better idea: do ducktyping without type checking,
-		# inherit from abstract class "Mapping" for getting dictionary-interface
-		# https://stackoverflow.com/questions/19775685/how-to-correctly-implement-the-mapping-protocol-in-python
-		# https://docs.python.org/2.7/library/collections.html#collections.MutableMapping
-		# (then the options are similar to Tkinter widgets: http://effbot.org/tkinterbook/tkinter-widget-configuration.htm )
-		#
-		#
-		## set all keyword arguments as instance attribut
-		## help from https://stackoverflow.com/questions/8187082/how-can-you-set-class-attributes-from-variable-arguments-kwargs-in-python
-		#self.__dict__.update(kwargs)
-
-		self._values_dict = {}
+		super(RespUnsub, self).__init__()
 
 		for field in RespUnsub._fields:
 			try:
@@ -920,24 +879,12 @@ class RespUnsub(_Response, collections.Mapping):
 				self._values_dict[field] = None
 
 		# init all common fields
-		super(RespUnsub, self).__init__(**kwargs)
-
-
-	def __getitem__(self, key):
-		return self._values_dict[key]
-
-	def __iter__(self):
-		return iter(self._values_dict)
-
-	def __len__(self):
-		return len(self._values_dict)
+		# (explicit calling _Response's constructor, because "super" would call "_Mydict"...)
+		_Response.__init__(self, **kwargs)
 
 	def __repr__(self):
 		""" developer representation of this object """
 		return u'RespUnsub(' + repr(self._values_dict) + u')'
-
-	def __str__(self):
-		return u'' + str(self._values_dict)
 
 
 class Subscription(axel.Event):
@@ -983,7 +930,7 @@ class Subscription(axel.Event):
 		self.unsubscribe()
 
 
-class DMSEvent(collections.Mapping):
+class DMSEvent(_Mydict):
 	# string constants
 	CODE_CHANGE = u'onChange'
 	CODE_SET = u'onSet'
@@ -1000,21 +947,8 @@ class DMSEvent(collections.Mapping):
 	           u'stamp',
 	           u'tag')
 
-
-
 	def __init__(self, **kwargs):
-		# better idea: do ducktyping without type checking,
-		# inherit from abstract class "Mapping" for getting dictionary-interface
-		# https://stackoverflow.com/questions/19775685/how-to-correctly-implement-the-mapping-protocol-in-python
-		# https://docs.python.org/2.7/library/collections.html#collections.MutableMapping
-		# (then the options are similar to Tkinter widgets: http://effbot.org/tkinterbook/tkinter-widget-configuration.htm )
-		#
-		#
-		## set all keyword arguments as instance attribut
-		## help from https://stackoverflow.com/questions/8187082/how-can-you-set-class-attributes-from-variable-arguments-kwargs-in-python
-		#self.__dict__.update(kwargs)
-
-		self._values_dict = {}
+		super(DMSEvent, self).__init__()
 
 		for field in DMSEvent._fields:
 			try:
@@ -1046,23 +980,9 @@ class DMSEvent(collections.Mapping):
 						'constructor of DMSEvent(): ERROR: field "code" in current response contains unknown value "' + repr(
 							self._values_dict[u'code']) + '"!')
 
-	def __getitem__(self, key):
-		return self._values_dict[key]
-
-	def __iter__(self):
-		return iter(self._values_dict)
-
-	def __len__(self):
-		return len(self._values_dict)
-
 	def __repr__(self):
 		""" developer representation of this object """
 		return u'DMSEvent(' + repr(self._values_dict) + u')'
-
-	def __str__(self):
-		return u'' + str(self._values_dict)
-
-
 
 
 
@@ -1452,15 +1372,23 @@ class DMSClient(object):
 
 if __name__ == '__main__':
 
-	myClient = DMSClient(u'test', u'user') #,  dms_host_str='192.168.10.173')
-	print('\n=>WebSocket connection runs now in background...')
+	test_set = set(['ws', 1, 11])
 
-	# while True:
-	# 	time.sleep(1)
-	# 	print('sending TESTMSG...')
-	# 	myClient._send_message(TESTMSG)
+	if 'ws' in test_set:
+		myClient = DMSClient(u'test', u'user')  # ,  dms_host_str='192.168.10.173')
+		print('\n=>WebSocket connection runs now in background...')
 
-	test_set = set([1])
+		# while True:
+		# 	time.sleep(1)
+		# 	print('sending TESTMSG...')
+		# 	myClient._send_message(TESTMSG)
+
+	if 0 in test_set:
+		print('\nTesting single classes....')
+		myobj = Query(regExPath=u'.*')
+		print('myobj: ' + repr(myobj) + ', as string: ' + str(myobj) + ', has type ' + str(type(myobj)))
+		print('myobj["regExPath"]= ' + repr(myobj["regExPath"]))
+
 
 	if 1 in test_set:
 		print('\nTesting creation of Request command:')
