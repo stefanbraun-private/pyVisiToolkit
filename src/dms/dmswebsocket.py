@@ -311,21 +311,22 @@ class _CmdSet(object):
 		self.request = {}
 		self.tag = msghandler.prepare_tag()
 
-		for key in kwargs:
+		for key in kwargs.keys():
 			# parsing request options
 			val = None
 			if key == u'create':
-				val = bool(kwargs[key])
+				val = bool(kwargs.pop(key))
 			elif key == u'type':
 				assert kwargs[key] in (u'int', u'double', u'string', u'bool'), u'unexpected type of value!'
-				val = u'' + kwargs[key]
+				val = u'' + kwargs.pop(key)
 			elif key == u'stamp':
 				# convert datetime.datetime object to ISO 8601 format
+				val_raw = kwargs.pop(key)
 				try:
-					val = u'' + kwargs[key].isoformat()
+					val = u'' + val_raw.isoformat()
 				except AttributeError:
 					# now we assume it's already a string
-					val = u'' + kwargs[key]
+					val = u'' + val_raw
 
 			if val:
 				self.request[key] = val
@@ -407,31 +408,31 @@ class _CmdSub(object):
 		self.path = u'' + path
 		self.query = {}
 		curr_tag = None
-		if u'tag' in kwargs:
+		if u'tag' in kwargs.keys():
 			# caller wants to reuse existing tag =>DMS will update subscription when path and tag match a current subscription
-			curr_tag = kwargs[u'tag']
+			curr_tag = kwargs.pop(u'tag')
 		self.tag = msghandler.prepare_tag(curr_tag=curr_tag)
 
 
-		for key in kwargs:
+		for key in kwargs.keys():
 			# parsing "query" object
 			val = None
 			if key == u'regExPath':
-				val = u'' + kwargs[key]
+				val = u'' + kwargs.pop(key)
 			elif key == u'regExValue':
-				val = u'' + kwargs[key]
+				val = u'' + kwargs.pop(key)
 			elif key == u'regExStamp':
-				val = u'' + kwargs[key]
+				val = u'' + kwargs.pop(key)
 			elif key == u'isType':
-				val = u'' + kwargs[key]
+				val = u'' + kwargs.pop(key)
 			elif key == u'hasHistData':
-				val = bool(kwargs[key])
+				val = bool(kwargs.pop(key))
 			elif key == u'hasAlarmData':
-				val = bool(kwargs[key])
+				val = bool(kwargs.pop(key))
 			elif key == u'hasProtocolData':
-				val = bool(kwargs[key])
+				val = bool(kwargs.pop(key))
 			elif key == u'maxDepth':
-				val = int(kwargs[key])
+				val = int(kwargs.pop(key))
 
 			if val:
 				self.query[key] = val
@@ -441,7 +442,7 @@ class _CmdSub(object):
 				# FIXME: we should implement something similar as in "sticky"-options of http://effbot.org/tkinterbook/grid.htm
 				#        =>defining int-constants CHANGE=1, SET=2, CREATE=4, RENAME=8, DELETE=16, ALL=31,
 				#          or handle these flags as string in a set()
-				self.event = u'' + kwargs[key]
+				self.event = u'' + kwargs.pop(key)
 
 
 	def as_dict(self):
@@ -599,7 +600,7 @@ class _Response(object):
 		# this variable has to be declared in child class...
 		for field in _Response._fields:
 			try:
-				self._values_dict[field] = kwargs[field]
+				self._values_dict[field] = kwargs.pop(field)
 			except KeyError:
 				# something went wrong, a mandatory field is missing... =>set error code
 				print('constructor of CmdResponse(): ERROR: mandatory field "' + field + '" is missing in current response!')
@@ -612,6 +613,9 @@ class _Response(object):
 		                                      _Response.CODE_ERROR):
 			print('constructor of CmdResponse(): ERROR: field "code" in current response contains unknown value "' + repr(self._values_dict[u'code']) + '"!')
 			# FIXME: what should we do if response code is unknown? Perhaps it's an unsupported JSON Data Exchange protocol?
+
+		if kwargs:
+			print('constructor of CmdResponse(): WARNING: these fields in current response are unknown, perhaps unsupported JSON Data Exchange protocol: "' + repr(kwargs) + '"!')
 
 
 class RespGet(_Mydict, _Response):
@@ -626,7 +630,7 @@ class RespGet(_Mydict, _Response):
 	           u'tag')
 
 	def __init__(self, **kwargs):
-		super(RespGet, self).__init__()
+		_Mydict.__init__(self, **kwargs)
 
 		for field in RespGet._fields:
 			try:
@@ -634,23 +638,23 @@ class RespGet(_Mydict, _Response):
 					# timestamps are ISO 8601 formatted (or "null" after DMS restart or on nodes with type "none")
 					# https://stackoverflow.com/questions/969285/how-do-i-translate-a-iso-8601-datetime-string-into-a-python-datetime-object
 					try:
-						self._values_dict[field] = dateutil.parser.parse(kwargs[field])
+						self._values_dict[field] = dateutil.parser.parse(kwargs.pop(field))
 					except:
 						self._values_dict[field] = None
 				elif field == u'extInfos':
-					self._values_dict[field] = ExtInfos(kwargs[field])
+					self._values_dict[field] = ExtInfos(kwargs.pop(field))
 				elif field == u'histData':
 					if kwargs[field]:
 						# parse response as "detail" or "compact" format
 						# according to documentation: default is "compact"
 						# =>checking first JSON-object if it contains "stamp" for choosing right parsing
-						histData_list = kwargs[field]
+						histData_list = kwargs.pop(field)
 						if not u'stamp' in histData_list[0]:
 							# assuming "compact" format
-							self._values_dict[field] = HistData_compact(kwargs[field])
+							self._values_dict[field] = HistData_compact(kwargs.pop(field))
 						else:
 							# assuming "detail" format
-							self._values_dict[field] = HistData_detail(kwargs[field])
+							self._values_dict[field] = HistData_detail(kwargs.pop(field))
 					else:
 						# histData is an empty list, we have no trenddata...
 						self._values_dict[field] = []
@@ -662,7 +666,7 @@ class RespGet(_Mydict, _Response):
 						raise NotImplementedError('"changelog" is not yet implemented')
 				else:
 					# default: no special treatment
-					self._values_dict[field] = kwargs[field]
+					self._values_dict[field] = kwargs.pop(field)
 			except KeyError:
 				# argument was not in response =>setting default value
 				if DEBUGGING:
@@ -687,7 +691,7 @@ class RespSet(_Mydict, _Response):
 	           u'tag')
 
 	def __init__(self, **kwargs):
-		super(RespSet, self).__init__()
+		_Mydict.__init__(self, **kwargs)
 
 		for field in RespSet._fields:
 			try:
@@ -695,12 +699,12 @@ class RespSet(_Mydict, _Response):
 					# timestamps are ISO 8601 formatted (or "null" after DMS restart or on nodes with type "none")
 					# https://stackoverflow.com/questions/969285/how-do-i-translate-a-iso-8601-datetime-string-into-a-python-datetime-object
 					try:
-						self._values_dict[field] = dateutil.parser.parse(kwargs[field])
+						self._values_dict[field] = dateutil.parser.parse(kwargs.pop(field))
 					except:
 						self._values_dict[field] = None
 				else:
 					# default: no special treatment
-					self._values_dict[field] = kwargs[field]
+					self._values_dict[field] = kwargs.pop(field)
 			except KeyError:
 				# argument was not in response =>setting default value
 				print('\tDEBUG: RespSet constructor: field "' + field + '" is not in response.')
@@ -722,12 +726,12 @@ class RespRen(_Mydict, _Response):
 	           u'tag')
 
 	def __init__(self, **kwargs):
-		super(RespRen, self).__init__()
+		_Mydict.__init__(self, **kwargs)
 
 		for field in RespRen._fields:
 			try:
 				# default: no special treatment
-				self._values_dict[field] = kwargs[field]
+				self._values_dict[field] = kwargs.pop(field)
 			except KeyError:
 				# argument was not in response =>setting default value
 				print('\tDEBUG: RespRen constructor: field "' + field + '" is not in response.')
@@ -748,12 +752,12 @@ class RespDel(_Mydict, _Response):
 	           u'tag')
 
 	def __init__(self, **kwargs):
-		super(RespDel, self).__init__()
+		_Mydict.__init__(self, **kwargs)
 
 		for field in RespDel._fields:
 			try:
 				# default: no special treatment
-				self._values_dict[field] = kwargs[field]
+				self._values_dict[field] = kwargs.pop(field)
 			except KeyError:
 				# argument was not in response =>setting default value
 				print('\tDEBUG: RespDel constructor: field "' + field + '" is not in response.')
@@ -787,7 +791,7 @@ class RespSub(_Mydict, _Response):
 	               u'maxDepth')
 
 	def __init__(self, **kwargs):
-		super(RespSub, self).__init__()
+		_Mydict.__init__(self, **kwargs)
 
 		for field in RespSub._fields:
 			try:
@@ -795,12 +799,12 @@ class RespSub(_Mydict, _Response):
 					# timestamps are ISO 8601 formatted (or "null" after DMS restart or on nodes with type "none")
 					# https://stackoverflow.com/questions/969285/how-do-i-translate-a-iso-8601-datetime-string-into-a-python-datetime-object
 					try:
-						self._values_dict[field] = dateutil.parser.parse(kwargs[field])
+						self._values_dict[field] = dateutil.parser.parse(kwargs.pop(field))
 					except:
 						self._values_dict[field] = None
 				else:
 					# default: no special treatment
-					self._values_dict[field] = kwargs[field]
+					self._values_dict[field] = kwargs.pop(field)
 			except KeyError:
 				# argument was not in response =>setting default value
 				print('\tDEBUG: RespSub constructor: field "' + field + '" is not in response.')
@@ -809,15 +813,20 @@ class RespSub(_Mydict, _Response):
 		# handle optional "query" object
 		# =>we insert an additional key "query" as flag if query was used.
 		# =>the fields have unique names, so we store them flat in our dictionary.
-		self._values_dict[u'query'] = u'query' in kwargs
-		for field in RespSub._opt_fields:
-			try:
-				# default: no special treatment
-				self._values_dict[field] = kwargs[u'query'][field]
-			except KeyError:
-				# argument was not in response =>setting default value
-				print('\tDEBUG: RespSub constructor: field "' + field + '" is not in response.')
-				self._values_dict[field] = None
+		if u'query' in kwargs:
+			self._values_dict[u'query'] = True
+			for field in RespSub._opt_fields:
+				try:
+					# default: no special treatment
+					self._values_dict[field] = kwargs[u'query'][field]
+				except KeyError:
+					# argument was not in response =>setting default value
+					print('\tDEBUG: RespSub constructor: field "' + field + '" is not in response.')
+					self._values_dict[field] = None
+			# preventing error in superclass
+			del(kwargs[u'query'])
+		else:
+			self._values_dict[u'query'] = False
 
 		# init all common fields
 		# (explicit calling _Response's constructor, because "super" would call "_Mydict"...)
@@ -846,7 +855,7 @@ class RespUnsub(_Mydict, _Response):
 	               u'maxDepth')
 
 	def __init__(self, **kwargs):
-		super(RespUnsub, self).__init__()
+		_Mydict.__init__(self, **kwargs)
 
 		for field in RespUnsub._fields:
 			try:
@@ -854,12 +863,12 @@ class RespUnsub(_Mydict, _Response):
 					# timestamps are ISO 8601 formatted (or "null" after DMS restart or on nodes with type "none")
 					# https://stackoverflow.com/questions/969285/how-do-i-translate-a-iso-8601-datetime-string-into-a-python-datetime-object
 					try:
-						self._values_dict[field] = dateutil.parser.parse(kwargs[field])
+						self._values_dict[field] = dateutil.parser.parse(kwargs.pop(field))
 					except:
 						self._values_dict[field] = None
 				else:
 					# default: no special treatment
-					self._values_dict[field] = kwargs[field]
+					self._values_dict[field] = kwargs.pop(field)
 			except KeyError:
 				# argument was not in response =>setting default value
 				print('\tDEBUG: RespUnsub constructor: field "' + field + '" is not in response.')
@@ -868,15 +877,20 @@ class RespUnsub(_Mydict, _Response):
 		# handle optional "query" object
 		# =>we insert an additional key "query" as flag if query was used.
 		# =>the fields have unique names, so we store them flat in our dictionary.
-		self._values_dict[u'query'] = u'query' in kwargs
-		for field in RespUnsub._opt_fields:
-			try:
-				# default: no special treatment
-				self._values_dict[field] = kwargs[u'query'][field]
-			except KeyError:
-				# argument was not in response =>setting default value
-				print('\tDEBUG: RespUnsub constructor: field "' + field + '" is not in response.')
-				self._values_dict[field] = None
+		if u'query' in kwargs:
+			self._values_dict[u'query'] = True
+			for field in RespUnsub._opt_fields:
+				try:
+					# default: no special treatment
+					self._values_dict[field] = kwargs[u'query'][field]
+				except KeyError:
+					# argument was not in response =>setting default value
+					print('\tDEBUG: RespUnsub constructor: field "' + field + '" is not in response.')
+					self._values_dict[field] = None
+			# preventing error in superclass
+			del (kwargs[u'query'])
+		else:
+			self._values_dict[u'query'] = False
 
 		# init all common fields
 		# (explicit calling _Response's constructor, because "super" would call "_Mydict"...)
