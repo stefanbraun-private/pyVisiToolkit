@@ -53,6 +53,18 @@ DMS_HOST = "127.0.0.1"      # local connection: doesn't need authentification
 DMS_BASEPATH = "/json_data" # default for HTTP and WebSocket
 
 
+# constants for event subscriptions by adding event values
+# implementing something similar as in "sticky"-options of http://effbot.org/tkinterbook/grid.htm
+# FIXME: should we refactor this? we use integers and string values in class DMSEvent() and _CmdSub()
+ON_CHANGE    = 1
+ON_SET       = 2
+ON_CREATE    = 4
+ON_RENAME    = 8
+ON_DELETE    = 16
+ON_ALL       = 31
+
+
+
 
 class _Mydict(collections.Mapping):
 	""" dictionary-like superclass """
@@ -439,10 +451,33 @@ class _CmdSub(object):
 
 			# parsing properties
 			if key == u'event':
-				# FIXME: we should implement something similar as in "sticky"-options of http://effbot.org/tkinterbook/grid.htm
-				#        =>defining int-constants CHANGE=1, SET=2, CREATE=4, RENAME=8, DELETE=16, ALL=31,
-				#          or handle these flags as string in a set()
-				self.event = u'' + kwargs.pop(key)
+				# event codes similar as in "sticky"-options of http://effbot.org/tkinterbook/grid.htm
+				# =>we expect an integer value, build as addition e.g. ON_CHANGE + ON_SET
+				val = kwargs.pop(key)
+				try:
+					self.event = self.eventcode_as_str(val)
+				except TypeError:
+					# assumption: it's already a string
+					self.event = u'' + val
+
+	def eventcode_as_str(self, code_int):
+		# build a string for DMS request
+		# it uses same eventcodes as in class DMSEvent()
+		strings_list = []
+		if code_int == ON_ALL:
+			strings_list = u'*'
+		else:
+			for val_int, val_str in [(ON_CHANGE, DMSEvent.CODE_CHANGE),
+			                         (ON_SET, DMSEvent.CODE_SET),
+			                         (ON_CREATE, DMSEvent.CODE_CREATE),
+			                         (ON_RENAME, DMSEvent.CODE_RENAME),
+			                         (ON_DELETE, DMSEvent.CODE_RENAME)]:
+				if code_int & ON_CHANGE:
+					# flag is set
+					strings_list.append(val_str)
+
+		return u','.join(strings_list)
+
 
 
 	def as_dict(self):
@@ -1489,7 +1524,7 @@ if __name__ == '__main__':
 		dms_blinker_str = "System:Blinker:Blink1.0"
 		print('Testing monitoring of DMS datapoint "' + dms_blinker_str + '"')
 		sub = myClient.get_dp_subscription(path=dms_blinker_str,
-		                                        event="onChange",
+		                                        event=ON_ALL,
 		                                        maxDepth=-1)
 		print('got Subscription object: ' + repr(sub))
 		print('adding callback function:')
@@ -1526,7 +1561,8 @@ if __name__ == '__main__':
 		dms_path_str = ""
 		print('Testing monitoring of DMS datapoint "' + dms_path_str + '"')
 		sub = myClient.get_dp_subscription(path=dms_path_str,
-		                                        event="onCreate",
+		                                        #event="onCreate",
+		                                        event=ON_CHANGE,
 		                                        maxDepth=-1)
 		print('got Subscription object: ' + repr(sub))
 		print('adding callback function:')
