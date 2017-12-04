@@ -25,7 +25,7 @@ This program is distributed in the hope that it will be useful, but WITHOUT ANY 
 You should have received a copy of the GNU General Public License along with this program. If not, see <http://www.gnu.org/licenses/>.
 """
 
-DEBUGGING = True
+DEBUGGING = False
 
 
 import json
@@ -93,6 +93,9 @@ class _Mydict(collections.Mapping):
 	def __str__(self):
 		return u'' + str(self._values_dict)
 
+	def as_dict(self):
+		return self._values_dict
+
 
 class _Mylist(collections.Sequence):
 	""" list-like superclass """
@@ -116,6 +119,8 @@ class _Mylist(collections.Sequence):
 	def __str__(self):
 		return u'' + str(self._values_list)
 
+	def as_list(self):
+		return self._values_list
 
 
 class _Request(object):
@@ -186,6 +191,7 @@ class Query(_Mydict):
 				# handle as boolean
 				val = bool(kwargs.pop(key))
 			elif key == u'maxDepth':
+				# handle as integer
 				val = int(kwargs.pop(key))
 			else:
 				raise ValueError('parameter "' + repr(key) + '" is illegal in "Query" object')
@@ -205,10 +211,10 @@ class HistData(_Mydict):
 		# convert datetime.datetime object to ISO 8601 format
 		val = None
 		try:
-			val = u'' + kwargs.pop(u'start').isoformat()
+			val = u'' + start.isoformat()
 		except AttributeError:
 			# now we assume it's already a string
-			val = u'' + kwargs.pop(u'start')
+			val = u'' + start
 		self._values_dict[u'start'] = val
 
 
@@ -216,11 +222,12 @@ class HistData(_Mydict):
 			val = None
 			if key == u'end':
 				# convert datetime.datetime object to ISO 8601 format
+				end_tstamp = kwargs.pop(key)
 				try:
-					val = u'' + kwargs.pop(key).isoformat()
+					val = u'' + end_tstamp.isoformat()
 				except AttributeError:
 					# now we assume it's already a string
-					val = u'' + kwargs.pop(key)
+					val = u'' + end_tstamp
 			elif key == u'interval':
 				# expecting number, conversion to int
 				val = int(kwargs.pop(key))
@@ -298,11 +305,11 @@ class _CmdGet(object):
 		if self.showExtInfos:
 			curr_dict[u'showExtInfos'] = self.showExtInfos
 		if self.query:
-			curr_dict[u'query'] = self.query
+			curr_dict[u'query'] = self.query.as_dict()
 		if self.histData:
-			curr_dict[u'histData'] = self.histData
+			curr_dict[u'histData'] = self.histData.as_dict()
 		if self.changelog:
-			curr_dict[u'changelog'] = self.changelog
+			curr_dict[u'changelog'] = self.changelog.as_dict()
 		curr_dict[u'tag'] = self.tag
 		return curr_dict
 
@@ -518,13 +525,15 @@ class _CmdUnsub(object):
 
 
 class ExtInfos(_Mydict):
-	""" optional extended infos about datapoint """
+	""" from DMS: optional extended infos about datapoint """
 
-	_fields = (u'template',
-	           u'name',
+	_fields = (u'state',
 	           u'accType',
+	           u'name',
+	           u'template',
 	           u'unit',
-	           u'comment')
+	           u'comment',
+	           u'changelogGroup')
 	def __init__(self, **kwargs):
 		super(ExtInfos, self).__init__()
 
@@ -543,7 +552,7 @@ class ExtInfos(_Mydict):
 
 
 class HistData_detail(_Mylist):
-	""" optional history data in detailed format """
+	""" from DMS: optional history data in detailed format """
 
 	_fields = (u'stamp',
 	           u'value',
@@ -585,7 +594,7 @@ class HistData_detail(_Mylist):
 
 
 class HistData_compact(_Mylist):
-	""" optional history data in compact format """
+	""" from DMS: optional history data in compact format """
 
 	def __init__(self, histobj_list):
 		super(HistData_compact, self).__init__()
@@ -612,6 +621,103 @@ class HistData_compact(_Mylist):
 	def __repr__(self):
 		""" developer representation of this object """
 		return u'HistData_compact(' + repr(self._values_list) + u')'
+
+
+class Changelog_Protocol(_Mylist):
+	""" from DMS: optional protocol data about datapoint """
+
+	_fields = (u'path',
+	           u'stamp',
+	           u'text')
+	def __init__(self, obj_list):
+		super(Changelog_Protocol, self).__init__()
+		# internal storage: list of dictionarys
+
+		for obj in obj_list:
+			curr_dict = {}
+			for field in Changelog._fields:
+				if field == u'stamp':
+					# timestamps are ISO 8601 formatted (or "null" after DMS restart or on nodes with type "none")
+					# https://stackoverflow.com/questions/969285/how-do-i-translate-a-iso-8601-datetime-string-into-a-python-datetime-object
+					try:
+						curr_dict[field] = dateutil.parser.parse(obj[field])
+					except ValueError:
+						# something went wrong, conversion into a datetime.datetime() object isn't possible
+						print(
+						'constructor of Changelog_Protocol(): ERROR: timestamp in current response could not get parsed as valid datetime.datetime() object!')
+						curr_dict[field] = None
+				elif field == u'path':
+					# path is optional when only one datapoint was requested
+					if u'path' in obj:
+						curr_dict[field] = obj[field]
+					else:
+						curr_dict[field] = None
+				else:
+					# other fields are string, currently no special treatment
+					try:
+						curr_dict[field] = obj[field]
+					except KeyError:
+						# something went wrong, a mandatory field is missing...
+						print(
+						'constructor of Changelog_Protocol(): ERROR: mandatory field "' + field + '" is missing in current response!')
+						# argument was not in response =>setting default value
+						curr_dict[field] = None
+			# save current dict, begin a new one
+			self._values_list.append(curr_dict)
+			curr_dict = {}
+
+	def __repr__(self):
+		""" developer representation of this object """
+		return u'Changelog_Protocol(' + repr(self._values_list) + u')'
+
+
+class Changelog_Alarm(Changelog_Protocol):
+	""" from DMS: optional changelog & alarm data about datapoint """
+
+	_fields = (u'state',
+	           u'priority',
+	           u'priorityBACnet',
+	           u'alarmGroup',
+	           u'alarmCollectGroup',
+	           u'siteGroup',
+	           u'screen')
+
+	def __init__(self, obj_list):
+		super(Changelog_Alarm, self).__init__(obj_list)
+		# internal storage: list of dictionarys
+
+		# looping again through list of objects for alarm data
+		for obj in obj_list:
+			curr_dict = {}
+			for field in Changelog_Alarm._fields:
+				if field in [u'priority', u'priorityBACnet', u'alarmGroup', u'alarmCollectGroup', u'siteGroup']:
+					# values as numbers
+					curr_dict[field] = int(obj[field])
+				elif field == u'screen':
+					# scada screen name is optional
+					if u'screen' in obj:
+						curr_dict[field] = obj[field]
+					else:
+						curr_dict[field] = None
+				else:
+					# other fields are string, currently no special treatment
+					try:
+						curr_dict[field] = obj[field]
+					except KeyError:
+						# something went wrong, a mandatory field is missing...
+						print(
+							'constructor of Changelog_Alarm(): ERROR: mandatory field "' + field + '" is missing in current response!')
+						# argument was not in response =>setting default value
+						curr_dict[field] = None
+			# save current dict, begin a new one
+			self._values_list.append(curr_dict)
+			curr_dict = {}
+
+	def __repr__(self):
+		""" developer representation of this object """
+		return u'Changelog_Alarm(' + repr(self._values_list) + u')'
+
+
 
 
 class _Response(object):
@@ -662,6 +768,7 @@ class RespGet(_Mydict, _Response):
 	           u'extInfos',
 	           u'message',
 	           u'histData',
+	           u'changelog',
 	           u'tag')
 
 	def __init__(self, **kwargs):
@@ -679,11 +786,11 @@ class RespGet(_Mydict, _Response):
 				elif field == u'extInfos':
 					self._values_dict[field] = ExtInfos(kwargs.pop(field))
 				elif field == u'histData':
-					if kwargs[field]:
+					histData_list = kwargs.pop(field)
+					if histData_list:
 						# parse response as "detail" or "compact" format
 						# according to documentation: default is "compact"
 						# =>checking first JSON-object if it contains "stamp" for choosing right parsing
-						histData_list = kwargs.pop(field)
 						if not u'stamp' in histData_list[0]:
 							# assuming "compact" format
 							self._values_dict[field] = HistData_compact(kwargs.pop(field))
@@ -697,8 +804,13 @@ class RespGet(_Mydict, _Response):
 					if kwargs[field]:
 						# parse response as "protocol" or "alarm" format
 						# =>checking first JSON-object if it contains "state" for choosing right parsing
-						# FIXME: do similar as in parsing "histData" (=>implement two classes)
-						raise NotImplementedError('"changelog" is not yet implemented')
+						obj_list = kwargs.pop(field)
+						if u'state' in obj_list[0]:
+							# datapoint has protocol + alarm
+							self._values_dict[field] = Changelog_Alarm(obj_list)
+						else:
+							# datapoint has only protocol
+							self._values_dict[field] = Changelog_Protocol(obj_list)
 				else:
 					# default: no special treatment
 					self._values_dict[field] = kwargs.pop(field)
@@ -1421,7 +1533,7 @@ class DMSClient(object):
 
 if __name__ == '__main__':
 
-	test_set = set(['ws', 1, 11])
+	test_set = set(['ws', 4])
 
 	if 'ws' in test_set:
 		myClient = DMSClient(u'test', u'user')  # ,  dms_host_str='192.168.10.173')
@@ -1463,18 +1575,25 @@ if __name__ == '__main__':
 	if 3 in test_set:
 		print('\nNow testing query function:')
 		print('\twithout query: ' + repr(myClient.dp_get(path="")))
-		print('\twith query: ' + repr(myClient.dp_get(path="", regExPath=".*", maxDepth=1)))
+		print('\twith query: ' + repr(myClient.dp_get(path="",
+		                                              query=Query(regExPath=".*", maxDepth=1)
+		                                              )
+		                              )
+		      )
+
 
 	if 4 in test_set:
 		print('\nTesting retrieving HistData:')
+		DEBUGGING = True
 		response = myClient.dp_get(path="MSR01:Ala101:Output_Lampe",
-		                           start="2017-08-22T12:38:50.486000+02:00",
-		                           end="2017-08-23T12:38:50.486000+02:00",
-		                           format="compact",
-		                           #format="detail",
-		                           interval=0,
-		                           showExtInfos=True,
-		                           maxDepth=0)
+		                           histData=HistData(start="2017-12-04T20:00:00.000000+02:00",
+		                                             end="2017-12-04T21:00:00.000000+02:00",
+		                                             #format="compact",
+		                                             format="detail",
+		                                             interval=0
+		                                             ),
+		                           showExtInfos=True
+		                           )
 		print('response: ' + repr(response))
 
 	if 5 in test_set:
@@ -1515,7 +1634,7 @@ if __name__ == '__main__':
 		for x in range(3):
 			response = myClient.dp_get(path="MSR01:And102",
 			                           showExtInfos=True,
-			                           maxDepth=-1,
+			                           query=Query(maxDepth=-1),
 			                           )
 			print('response to our request: ' + repr(response))
 			print('*' * 20)
@@ -1525,7 +1644,7 @@ if __name__ == '__main__':
 		print('Testing monitoring of DMS datapoint "' + dms_blinker_str + '"')
 		sub = myClient.get_dp_subscription(path=dms_blinker_str,
 		                                        event=ON_ALL,
-		                                        maxDepth=-1)
+		                                        query=Query(maxDepth=-1))
 		print('got Subscription object: ' + repr(sub))
 		print('adding callback function:')
 		def myfunc(event):
@@ -1563,7 +1682,7 @@ if __name__ == '__main__':
 		sub = myClient.get_dp_subscription(path=dms_path_str,
 		                                        #event="onCreate",
 		                                        event=ON_CHANGE,
-		                                        maxDepth=-1)
+		                                        query=Query(maxDepth=-1))
 		print('got Subscription object: ' + repr(sub))
 		print('adding callback function:')
 		def myfunc(event):
