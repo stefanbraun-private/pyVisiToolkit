@@ -250,15 +250,16 @@ class Changelog(_Mydict):
 	def __init__(self, start, end=None):
 		super(Changelog, self).__init__()
 
-		for key in [start, end]:
-			if key != None:
+		for key, tstamp in [(u'start', start),
+		                    (u'end', end)]:
+			if tstamp != None:
 				# convert datetime.datetime object to ISO 8601 format
 				val = None
 				try:
-					val = u'' + key.isoformat()
+					val = u'' + tstamp.isoformat()
 				except AttributeError:
 					# now we assume it's already a string
-					val = u'' + key
+					val = u'' + tstamp
 				self._values_dict[key] = val
 
 	def __repr__(self):
@@ -635,7 +636,7 @@ class Changelog_Protocol(_Mylist):
 
 		for obj in obj_list:
 			curr_dict = {}
-			for field in Changelog._fields:
+			for field in Changelog_Protocol._fields:
 				if field == u'stamp':
 					# timestamps are ISO 8601 formatted (or "null" after DMS restart or on nodes with type "none")
 					# https://stackoverflow.com/questions/969285/how-do-i-translate-a-iso-8601-datetime-string-into-a-python-datetime-object
@@ -686,8 +687,9 @@ class Changelog_Alarm(Changelog_Protocol):
 		super(Changelog_Alarm, self).__init__(obj_list)
 		# internal storage: list of dictionarys
 
-		# looping again through list of objects for alarm data
-		for obj in obj_list:
+		# looping again through list of objects for alarm data,
+		# appending additional key/value pairs into internal list of dictionarys
+		for idx, obj in enumerate(obj_list):
 			curr_dict = {}
 			for field in Changelog_Alarm._fields:
 				if field in [u'priority', u'priorityBACnet', u'alarmGroup', u'alarmCollectGroup', u'siteGroup']:
@@ -709,8 +711,9 @@ class Changelog_Alarm(Changelog_Protocol):
 							'constructor of Changelog_Alarm(): ERROR: mandatory field "' + field + '" is missing in current response!')
 						# argument was not in response =>setting default value
 						curr_dict[field] = None
-			# save current dict, begin a new one
-			self._values_list.append(curr_dict)
+			# save current dict (combine it into existing one already filled by superclass)
+			self._values_list[idx].update(curr_dict)
+			# begin a new one
 			curr_dict = {}
 
 	def __repr__(self):
@@ -793,24 +796,27 @@ class RespGet(_Mydict, _Response):
 						# =>checking first JSON-object if it contains "stamp" for choosing right parsing
 						if not u'stamp' in histData_list[0]:
 							# assuming "compact" format
-							self._values_dict[field] = HistData_compact(kwargs.pop(field))
+							self._values_dict[field] = HistData_compact(histData_list)
 						else:
 							# assuming "detail" format
-							self._values_dict[field] = HistData_detail(kwargs.pop(field))
+							self._values_dict[field] = HistData_detail(histData_list)
 					else:
 						# histData is an empty list, we have no trenddata...
 						self._values_dict[field] = []
 				elif field == u'changelog':
-					if kwargs[field]:
+					obj_list = kwargs.pop(field)
+					if obj_list:
 						# parse response as "protocol" or "alarm" format
 						# =>checking first JSON-object if it contains "state" for choosing right parsing
-						obj_list = kwargs.pop(field)
 						if u'state' in obj_list[0]:
 							# datapoint has protocol + alarm
 							self._values_dict[field] = Changelog_Alarm(obj_list)
 						else:
 							# datapoint has only protocol
 							self._values_dict[field] = Changelog_Protocol(obj_list)
+					else:
+						# changelog is an empty list, we have no changelogs...
+						self._values_dict[field] = []
 				else:
 					# default: no special treatment
 					self._values_dict[field] = kwargs.pop(field)
@@ -1533,7 +1539,7 @@ class DMSClient(object):
 
 if __name__ == '__main__':
 
-	test_set = set(['ws', 4])
+	test_set = set(['ws', 15])
 
 	if 'ws' in test_set:
 		myClient = DMSClient(u'test', u'user')  # ,  dms_host_str='192.168.10.173')
@@ -1586,8 +1592,8 @@ if __name__ == '__main__':
 		print('\nTesting retrieving HistData:')
 		DEBUGGING = True
 		response = myClient.dp_get(path="MSR01:Ala101:Output_Lampe",
-		                           histData=HistData(start="2017-12-04T20:00:00.000000+02:00",
-		                                             end="2017-12-04T21:00:00.000000+02:00",
+		                           histData=HistData(start="2017-12-05T19:00:00,000+02:00",
+		                                             #end="2017-12-05T19:35:00,000+02:00",
 		                                             #format="compact",
 		                                             format="detail",
 		                                             interval=0
@@ -1698,3 +1704,34 @@ if __name__ == '__main__':
 		time.sleep(2)
 
 		print('Done.')
+
+
+	if 13 in test_set:
+		print('\nTesting retrieving Changelog:')
+		DEBUGGING = True
+		response = myClient.dp_get(path="MSR01:Ala101:Hand",
+		                           changelog=Changelog(start="2017-12-05T19:00:00,000+02:00",
+		                                               #end="2017-12-05T20:30:00,000+02:00"
+		                                               )
+		                           )
+		print('response: ' + repr(response))
+
+
+	if 14 in test_set:
+		print('\nTesting retrieving Changelog of alarm datapoint:')
+		DEBUGGING = True
+		response = myClient.dp_get(path="MSR01:Bat101:SM_Err",
+		                           changelog=Changelog(start="2017-12-05T19:00:00,000+02:00",
+		                                               #end="2017-12-05T20:30:00,000+02:00"
+		                                               )
+		                           )
+		print('response: ' + repr(response))
+
+
+	if 15 in test_set:
+		print('\nTesting retrieving ExtInfos:')
+		DEBUGGING = True
+		response = myClient.dp_get(path="MSR01:Ala101:Hand",
+		                           showExtInfos=True
+		                           )
+		print('response: ' + repr(response))
