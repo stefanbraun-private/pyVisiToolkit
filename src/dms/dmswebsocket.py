@@ -325,7 +325,7 @@ class _CmdSet(object):
 
 	def __init__(self, msghandler, path, value, **kwargs):
 		# parsing of kwargs: help from https://stackoverflow.com/questions/5624912/kwargs-parsing-best-practice
-		# =>since all fields in "get" object and all it's subobjects are unique, we could handle them in the same loop
+		# =>since all fields in "set" object and all it's subobjects are unique, we could handle them in the same loop
 		self.path = u'' + path
 		self.value = value
 		self.request = {}
@@ -347,6 +347,8 @@ class _CmdSet(object):
 				except AttributeError:
 					# now we assume it's already a string
 					val = u'' + val_raw
+			else:
+				raise ValueError('field "' + repr(kwargs) + '" is illegal in "set" request')
 
 			if val:
 				self.request[key] = val
@@ -371,11 +373,13 @@ class _CmdRen(object):
 
 	def __init__(self, msghandler, path, newPath, **kwargs):
 		# kwargs are not used. we keep them for future extensions
-		# parsing of kwargs: help from https://stackoverflow.com/questions/5624912/kwargs-parsing-best-practice
-		# =>since all fields in "get" object and all it's subobjects are unique, we could handle them in the same loop
 		self.path = u'' + path
 		self.newPath = u'' + newPath
 		self.tag = msghandler.prepare_tag()
+
+		if kwargs:
+			raise ValueError('field "' + repr(kwargs) + '" is illegal in "rename" request')
+
 
 	def as_dict(self):
 		curr_dict = {}
@@ -395,14 +399,16 @@ class _CmdDel(object):
 
 	def __init__(self, msghandler, path, recursive=None, **kwargs):
 		# kwargs are not used. we keep them for future extensions
-		# parsing of kwargs: help from https://stackoverflow.com/questions/5624912/kwargs-parsing-best-practice
-		# =>since all fields in "get" object and all it's subobjects are unique, we could handle them in the same loop
 		self.path = u'' + path
 
 		# flag "recursive" is optional, default in DMS is False.
 		# Because this is a possible dangerous command we allow explicit sending of False over the wire!
 		self.recursive = recursive
 		self.tag = msghandler.prepare_tag()
+
+		if kwargs:
+			raise ValueError('field "' + repr(kwargs) + '" is illegal in "delete" request')
+
 
 	def as_dict(self):
 		curr_dict = {}
@@ -424,9 +430,9 @@ class _CmdSub(object):
 
 	def __init__(self, msghandler, path, **kwargs):
 		# parsing of kwargs: help from https://stackoverflow.com/questions/5624912/kwargs-parsing-best-practice
-		# =>since all fields in "get" object and all it's subobjects are unique, we could handle them in the same loop
+		# =>since all fields in "sub" object and all it's subobjects are unique, we could handle them in the same loop
 		self.path = u'' + path
-		self.query = {}
+		self.query = None
 		curr_tag = None
 		if u'tag' in kwargs.keys():
 			# caller wants to reuse existing tag =>DMS will update subscription when path and tag match a current subscription
@@ -436,26 +442,9 @@ class _CmdSub(object):
 
 		for key in kwargs.keys():
 			# parsing "query" object
-			val = None
-			if key == u'regExPath':
-				val = u'' + kwargs.pop(key)
-			elif key == u'regExValue':
-				val = u'' + kwargs.pop(key)
-			elif key == u'regExStamp':
-				val = u'' + kwargs.pop(key)
-			elif key == u'isType':
-				val = u'' + kwargs.pop(key)
-			elif key == u'hasHistData':
-				val = bool(kwargs.pop(key))
-			elif key == u'hasAlarmData':
-				val = bool(kwargs.pop(key))
-			elif key == u'hasProtocolData':
-				val = bool(kwargs.pop(key))
-			elif key == u'maxDepth':
-				val = int(kwargs.pop(key))
-
-			if val:
-				self.query[key] = val
+			if key == u'query':
+				self.query = kwargs.pop(key)
+				assert type(self.query) is Query, u'field "query" expects "Query" object, got "' + str(type(self.query)) + u'" instead'
 
 			# parsing properties
 			if key == u'event':
@@ -467,6 +456,10 @@ class _CmdSub(object):
 				except TypeError:
 					# assumption: it's already a string
 					self.event = u'' + val
+
+		if kwargs:
+			raise ValueError('field "' + repr(kwargs) + '" is illegal in "subscribe" request')
+
 
 	def eventcode_as_str(self, code_int):
 		# build a string for DMS request
@@ -492,7 +485,7 @@ class _CmdSub(object):
 		curr_dict = {}
 		curr_dict[u'path'] = self.path
 		if self.query:
-			curr_dict[u'query'] = self.query
+			curr_dict[u'query'] = self.query.as_dict()
 		if self.event:
 			curr_dict[u'event'] = self.event
 		curr_dict[u'tag'] = self.tag
@@ -1539,10 +1532,11 @@ class DMSClient(object):
 
 if __name__ == '__main__':
 
-	test_set = set(['ws', 15])
+	test_set = set(['ws', 11])
 
 	if 'ws' in test_set:
-		myClient = DMSClient(u'test', u'user')  # ,  dms_host_str='192.168.10.173')
+		myClient = DMSClient(u'test', u'user')
+		#myClient = DMSClient(u'test', u'user', dms_host_str="192.168.10.173", dms_port_int=1234)
 		print('\n=>WebSocket connection runs now in background...')
 
 		# while True:
