@@ -473,7 +473,7 @@ class _CmdSub(object):
 			                         (ON_CREATE, DMSEvent.CODE_CREATE),
 			                         (ON_RENAME, DMSEvent.CODE_RENAME),
 			                         (ON_DELETE, DMSEvent.CODE_RENAME)]:
-				if code_int & ON_CHANGE:
+				if code_int & val_int:
 					# flag is set
 					strings_list.append(val_str)
 
@@ -921,20 +921,12 @@ class RespDel(_Mydict, _Response):
 
 class RespSub(_Mydict, _Response):
 	_fields = (u'path',
+	           u'query',
 	           u'value',
 	           u'type',
 	           u'stamp',
 	           u'message',
 	           u'tag')
-	# "query" object is optional
-	_opt_fields = (u'regExPath',
-	               u'regExValue',
-	               u'regExStamp',
-	               u'isType',
-	               u'hasHistData',
-	               u'hasAlarmData',
-	               u'hasProtocolData',
-	               u'maxDepth')
 
 	def __init__(self, **kwargs):
 		_Mydict.__init__(self, **kwargs)
@@ -948,6 +940,14 @@ class RespSub(_Mydict, _Response):
 						self._values_dict[field] = dateutil.parser.parse(kwargs.pop(field))
 					except:
 						self._values_dict[field] = None
+				elif field == u'query':
+					# handle optional "query" object
+					query_dict = kwargs.pop(field)
+					try:
+						self._values_dict[field] = Query(**query_dict)
+					except ValueError as ex:
+						print('\tWARNING: in RespSub(): consctructor of Query() found unknown fields in current response, perhaps unsupported JSON Data Exchange protocol!')
+						raise ex
 				else:
 					# default: no special treatment
 					self._values_dict[field] = kwargs.pop(field)
@@ -955,24 +955,6 @@ class RespSub(_Mydict, _Response):
 				# argument was not in response =>setting default value
 				print('\tDEBUG: RespSub constructor: field "' + field + '" is not in response.')
 				self._values_dict[field] = None
-
-		# handle optional "query" object
-		# =>we insert an additional key "query" as flag if query was used.
-		# =>the fields have unique names, so we store them flat in our dictionary.
-		if u'query' in kwargs:
-			self._values_dict[u'query'] = True
-			for field in RespSub._opt_fields:
-				try:
-					# default: no special treatment
-					self._values_dict[field] = kwargs[u'query'][field]
-				except KeyError:
-					# argument was not in response =>setting default value
-					print('\tDEBUG: RespSub constructor: field "' + field + '" is not in response.')
-					self._values_dict[field] = None
-			# preventing error in superclass
-			del(kwargs[u'query'])
-		else:
-			self._values_dict[u'query'] = False
 
 		# init all common fields
 		# (explicit calling _Response's constructor, because "super" would call "_Mydict"...)
@@ -985,20 +967,12 @@ class RespSub(_Mydict, _Response):
 
 class RespUnsub(_Mydict, _Response):
 	_fields = (u'path',
+	           u'query',
 	           u'value',
 	           u'type',
 	           u'stamp',
 	           u'message',
 	           u'tag')
-	# "query" object is optional
-	_opt_fields = (u'regExPath',
-	               u'regExValue',
-	               u'regExStamp',
-	               u'isType',
-	               u'hasHistData',
-	               u'hasAlarmData',
-	               u'hasProtocolData',
-	               u'maxDepth')
 
 	def __init__(self, **kwargs):
 		_Mydict.__init__(self, **kwargs)
@@ -1012,6 +986,14 @@ class RespUnsub(_Mydict, _Response):
 						self._values_dict[field] = dateutil.parser.parse(kwargs.pop(field))
 					except:
 						self._values_dict[field] = None
+				elif field == u'query':
+					# handle optional "query" object
+					query_dict = kwargs.pop(field)
+					try:
+						self._values_dict[field] = Query(**query_dict)
+					except ValueError as ex:
+						print('\tWARNING: in RespUnsub(): constructor of Query() found unknown fields in current response, perhaps unsupported JSON Data Exchange protocol!')
+						raise ex
 				else:
 					# default: no special treatment
 					self._values_dict[field] = kwargs.pop(field)
@@ -1019,24 +1001,6 @@ class RespUnsub(_Mydict, _Response):
 				# argument was not in response =>setting default value
 				print('\tDEBUG: RespUnsub constructor: field "' + field + '" is not in response.')
 				self._values_dict[field] = None
-
-		# handle optional "query" object
-		# =>we insert an additional key "query" as flag if query was used.
-		# =>the fields have unique names, so we store them flat in our dictionary.
-		if u'query' in kwargs:
-			self._values_dict[u'query'] = True
-			for field in RespUnsub._opt_fields:
-				try:
-					# default: no special treatment
-					self._values_dict[field] = kwargs[u'query'][field]
-				except KeyError:
-					# argument was not in response =>setting default value
-					print('\tDEBUG: RespUnsub constructor: field "' + field + '" is not in response.')
-					self._values_dict[field] = None
-			# preventing error in superclass
-			del (kwargs[u'query'])
-		else:
-			self._values_dict[u'query'] = False
 
 		# init all common fields
 		# (explicit calling _Response's constructor, because "super" would call "_Mydict"...)
@@ -1084,10 +1048,14 @@ class Subscription(axel.Event):
 		                                  tag=self.sub_response[u'tag'])
 		self._msghandler.del_subscription(self)
 
+
 	def __del__(self):
-		# destructor: first unsubscribe from DMS,
-		# we assume garbage collector will delete all internal references
-		self.unsubscribe()
+		# destructor: being friendly: unsubscribe from DMS for stopping events
+		try:
+			# on shutting down Python program this could raise an TypeError
+			self.unsubscribe()
+		except TypeError:
+			pass
 
 
 class DMSEvent(_Mydict):
@@ -1532,7 +1500,7 @@ class DMSClient(object):
 
 if __name__ == '__main__':
 
-	test_set = set(['ws', 11])
+	test_set = set(['ws', 12])
 
 	if 'ws' in test_set:
 		myClient = DMSClient(u'test', u'user')
@@ -1640,11 +1608,12 @@ if __name__ == '__main__':
 			print('*' * 20)
 
 	if 11 in test_set:
+		DEBUGGING = False
 		dms_blinker_str = "System:Blinker:Blink1.0"
 		print('Testing monitoring of DMS datapoint "' + dms_blinker_str + '"')
 		sub = myClient.get_dp_subscription(path=dms_blinker_str,
-		                                        event=ON_ALL,
-		                                        query=Query(maxDepth=-1))
+		                                   event=ON_ALL,
+		                                   query=Query(maxDepth=-1))
 		print('got Subscription object: ' + repr(sub))
 		print('adding callback function:')
 		def myfunc(event):
@@ -1677,11 +1646,11 @@ if __name__ == '__main__':
 
 
 	if 12 in test_set:
+		DEBUGGING = False
 		dms_path_str = ""
 		print('Testing monitoring of DMS datapoint "' + dms_path_str + '"')
 		sub = myClient.get_dp_subscription(path=dms_path_str,
-		                                        #event="onCreate",
-		                                        event=ON_CHANGE,
+		                                        event=ON_CREATE + ON_DELETE,
 		                                        query=Query(maxDepth=-1))
 		print('got Subscription object: ' + repr(sub))
 		print('adding callback function:')
