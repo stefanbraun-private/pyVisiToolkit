@@ -53,8 +53,23 @@ DMS_HOST = "127.0.0.1"      # local connection: doesn't need authentification
 DMS_BASEPATH = "/json_data" # default for HTTP and WebSocket
 
 
-# constants for event subscriptions by adding event values
+# constants for retrieving extended infos ("extInfos")
 # implementing something similar as in "sticky"-options of http://effbot.org/tkinterbook/grid.htm
+# =>selection of more than one event is possible by addition or with OR: ON_CHANGE + ON_SET // ON_CHANGE | ON_SET
+# (parsing is done in class _CmdGet())
+INFO_STATE          = 1     # state of this value
+INFO_ACCTYPE        = 2     # accurate type information
+INFO_NAME           = 4     # topmost "NAME" datapoint of this tree
+INFO_TEMPLATE       = 8     # topmost "OBJECT" datapoint of this tree
+INFO_UNIT           = 16    # unit //FIXME: what's the name of a unit-datapoint?
+INFO_COMMENT        = 32    # comment
+INFO_CHANGELOGGROUP = 64    # group name of changelog protocol
+INFO_ALL            = 127   # combination of all above
+
+
+# constants for event subscriptions
+# implementing something similar as in "sticky"-options of http://effbot.org/tkinterbook/grid.htm
+# =>selection of more than one event is possible by addition or with OR: ON_CHANGE + ON_SET // ON_CHANGE | ON_SET
 # FIXME: should we refactor this? we use integers and string values in class DMSEvent() and _CmdSub()
 ON_CHANGE    = 1
 ON_SET       = 2
@@ -62,6 +77,7 @@ ON_CREATE    = 4
 ON_RENAME    = 8
 ON_DELETE    = 16
 ON_ALL       = 31
+
 
 
 
@@ -286,7 +302,14 @@ class _CmdGet(object):
 
 		for key in kwargs.keys():
 			if key == u'showExtInfos':
-				self.showExtInfos = bool(kwargs.pop(key))
+				showExtInfos = kwargs.pop(key)
+				try:
+					showExtInfos_int = int(showExtInfos)
+					assert showExtInfos_int > 0 and showExtInfos_int <= INFO_ALL, u'field "showExtInfos" excepts integer constant, got illegal value "' + str(showExtInfos_int) + u'"'
+					self.showExtInfos = self.showExtInfos_as_strlist(showExtInfos_int)
+				except ValueError:
+					# assumption: it's already a list of strings
+					self.showExtInfos = [].extend(showExtInfos)
 			elif key == u'query':
 				self.query = kwargs.pop(key)
 				assert type(self.query) is Query, u'field "query" expects "Query" object, got "' + str(type(self.query)) + u'" instead'
@@ -295,9 +318,28 @@ class _CmdGet(object):
 				assert type(self.histData) is HistData, u'field "histData" expects "HistData" object, got "' + str(type(self.histData)) + u'" instead'
 			elif key == u'changelog':
 				self.changelog = kwargs.pop(key)
-				assert type(self.changelog) is Changelog, u'field "changelog" expects "Changelog" object, got "' + str(type(self.histData)) + u'" instead'
+				assert type(self.changelog) is Changelog, u'field "changelog" expects "Changelog" object, got "' + str(type(self.changelog)) + u'" instead'
 			else:
 				raise ValueError('field "' + repr(key) + '" is illegal in "get" request')
+
+
+	def showExtInfos_as_strlist(self, showExtInfos_int):
+		# build a list of strings for DMS request
+		# it uses same eventcodes as in class DMSEvent()
+		strings_list = []
+		for val_int, val_str in [(INFO_STATE,           u'state'),
+		                         (INFO_ACCTYPE,         u'accType'),
+		                         (INFO_NAME,            u'name'),
+		                         (INFO_TEMPLATE,        u'template'),
+		                         (INFO_UNIT,            u'unit'),
+		                         (INFO_COMMENT,         u'comment'),
+		                         (INFO_CHANGELOGGROUP,  u'changelogGroup')]:
+			if showExtInfos_int == INFO_ALL or showExtInfos_int & val_int:
+				# flag is set
+				strings_list.append(val_str)
+
+		return strings_list
+
 
 
 	def as_dict(self):
@@ -515,6 +557,31 @@ class _CmdUnsub(object):
 
 	def get_type(self):
 		return _CmdUnsub.CMD_TYPE
+
+
+
+class _CmdChangelogGetGroups(object):
+	""" one unique "changelogGetGroups" request, parsed from **kwargs """
+
+	CMD_TYPE = u'changelogGetGroups'
+
+	def __init__(self, msghandler, **kwargs):
+		# kwargs are not used. we keep them for future extensions
+
+		self.tag = msghandler.prepare_tag()
+
+		if kwargs:
+			raise ValueError('field "' + repr(kwargs) + '" is illegal in "changelogGetGroups" request')
+
+
+	def as_dict(self):
+		curr_dict = {}
+		curr_dict[u'changelogGetGroups'] = []
+		curr_dict[u'tag'] = self.tag
+		return curr_dict
+
+	def get_type(self):
+		return _CmdChangelogGetGroups.CMD_TYPE
 
 
 
@@ -780,7 +847,8 @@ class RespGet(_Mydict, _Response):
 					except:
 						self._values_dict[field] = None
 				elif field == u'extInfos':
-					self._values_dict[field] = ExtInfos(kwargs.pop(field))
+					extInfos_dict = kwargs.pop(field)
+					self._values_dict[field] = ExtInfos(**extInfos_dict)
 				elif field == u'histData':
 					histData_list = kwargs.pop(field)
 					if histData_list:
@@ -1009,6 +1077,33 @@ class RespUnsub(_Mydict, _Response):
 	def __repr__(self):
 		""" developer representation of this object """
 		return u'RespUnsub(' + repr(self._values_dict) + u')'
+
+
+class RespChangelogGetGroups(_Mydict, _Response):
+	_fields = (u'groups',
+	           u'tag')
+
+	def __init__(self, **kwargs):
+		_Mydict.__init__(self, **kwargs)
+
+		for field in RespChangelogGetGroups._fields:
+			try:
+				# default: no special treatment
+				self._values_dict[field] = kwargs.pop(field)
+			except KeyError:
+				# argument was not in response =>setting default value
+				print('\tDEBUG: RespChangelogGetGroups constructor: field "' + field + '" is not in response.')
+				self._values_dict[field] = None
+
+		# init all common fields
+		# (explicit calling _Response's constructor, because "super" would call "_Mydict"...)
+		_Response.__init__(self, **kwargs)
+
+	def __repr__(self):
+		""" developer representation of this object """
+		return u'RespChangelogGetGroups(' + repr(self._values_dict) + u')'
+
+
 
 
 class Subscription(axel.Event):
@@ -1263,6 +1358,24 @@ class _MessageHandler(object):
 			raise Exception('Please report this bug of pyVisiToolkit!')
 
 
+	def changelog_GetGroups(self, timeout=10, **kwargs):
+		""" get list of available changelog groups """
+
+		req = _Request(whois=self._whois_str, user=self._user_str).addCmd(
+			_CmdChangelogGetGroups(msghandler=self, **kwargs))
+		self._send_frame(req)
+
+		try:
+			tag = req.get_tags()[0]
+			return self._busy_wait_for_response(tag, timeout)
+		except IndexError:
+			# something went wrong...
+			if DEBUGGING:
+				print('error in changelog_GetGroups(): len(req.get_tags())=' + str(len(req.get_tags())) + ', too much or too few responses? sending more than one command per request is not implemented!')
+			raise Exception('Please report this bug of pyVisiToolkit!')
+
+
+
 	def handle(self, msg):
 		payload_dict = json.loads(msg.decode('utf8'))
 
@@ -1273,7 +1386,8 @@ class _MessageHandler(object):
 			                            (u'rename', RespRen),
 			                            (u'delete', RespDel),
 			                            (u'subscribe', RespSub),
-			                            (u'unsubscribe', RespUnsub)]:
+			                            (u'unsubscribe', RespUnsub),
+			                            (u'changelogGetGroups', RespChangelogGetGroups)]:
 				if resp_type in payload_dict:
 					# handling responses to command
 
@@ -1456,6 +1570,10 @@ class DMSClient(object):
 		else:
 			raise Exception(u'DMS ignored subscription of "' + path + '" with error "' + response.code + '"!')
 
+	def changelog_GetGroups(self, **kwargs):
+		""" get list of available changelog groups """
+		return self._msghandler.changelog_GetGroups(**kwargs)
+
 
 	def _send_message(self, msg):
 		if self.ready_to_send.wait(timeout=10):     # timeout in seconds
@@ -1500,7 +1618,7 @@ class DMSClient(object):
 
 if __name__ == '__main__':
 
-	test_set = set(['ws', 12])
+	test_set = set(['ws', 16])
 
 	if 'ws' in test_set:
 		myClient = DMSClient(u'test', u'user')
@@ -1560,7 +1678,7 @@ if __name__ == '__main__':
 		                                             format="detail",
 		                                             interval=0
 		                                             ),
-		                           showExtInfos=True
+		                           showExtInfos=INFO_ALL
 		                           )
 		print('response: ' + repr(response))
 
@@ -1601,7 +1719,7 @@ if __name__ == '__main__':
 		print('"get":')
 		for x in range(3):
 			response = myClient.dp_get(path="MSR01:And102",
-			                           showExtInfos=True,
+			                           showExtInfos=INFO_ALL,
 			                           query=Query(maxDepth=-1),
 			                           )
 			print('response to our request: ' + repr(response))
@@ -1695,6 +1813,13 @@ if __name__ == '__main__':
 		print('\nTesting retrieving ExtInfos:')
 		DEBUGGING = True
 		response = myClient.dp_get(path="MSR01:Ala101:Hand",
-		                           showExtInfos=True
+		                           showExtInfos=INFO_ALL
 		                           )
+		print('response: ' + repr(response))
+
+
+	if 16 in test_set:
+		print('\nTesting retrieving available changelog groups:')
+		DEBUGGING = True
+		response = myClient.changelog_GetGroups()
 		print('response: ' + repr(response))
