@@ -144,7 +144,8 @@ class _Request(object):
 	def __init__(self, whois, user):
 		self.whois = u'' + whois
 		self.user = u'' + user
-		self.tag = None # we don't tag the whole request, since we tag all single commands inside request
+		self.tag = None # normally we don't tag the whole request, since we can tag most single commands inside request
+
 		# dict of lists, containing all pending commands
 		self._cmd_dict = {}
 		self._cmd_tags_list = []
@@ -152,6 +153,7 @@ class _Request(object):
 	def addCmd(self, *args):
 		for cmd in args:
 			curr_type = cmd.get_type()
+
 			if not curr_type in self._cmd_dict:
 				self._cmd_dict[curr_type] = []
 			# include this command into request and update list with message tags
@@ -166,6 +168,21 @@ class _Request(object):
 		curr_dict = {}
 		curr_dict[u'whois'] = self.whois
 		curr_dict[u'user'] = self.user
+
+		if self.tag:
+			# tagging whole frame
+			curr_dict[u'tag'] = self.tag
+		else:
+			# special treatment of tagless commands: tagging whole frame with helper-dictionary for identification of response
+			tag_dict = {}
+			if _CmdChangelogGetGroups.CMD_TYPE in self._cmd_dict:
+				groups_tag_list = []
+				for groupCmd in self._cmd_dict[_CmdChangelogGetGroups.CMD_TYPE]:
+					groups_tag_list.append(groupCmd.get_tag())
+				tag_dict[_CmdChangelogGetGroups.CMD_TYPE] = groups_tag_list
+			if tag_dict:
+				curr_dict[u'tag'] = tag_dict
+
 		for cmdtype in self._cmd_dict:
 			curr_list = []
 			for cmd in self._cmd_dict[cmdtype]:
@@ -562,12 +579,14 @@ class _CmdUnsub(object):
 
 class _CmdChangelogGetGroups(object):
 	""" one unique "changelogGetGroups" request, parsed from **kwargs """
+	# ATTENTION: this command doesn't use an own tag, we must tag the whole frame!
 
 	CMD_TYPE = u'changelogGetGroups'
 
 	def __init__(self, msghandler, **kwargs):
 		# kwargs are not used. we keep them for future extensions
 
+		# tag is handled in class _Request()
 		self.tag = msghandler.prepare_tag()
 
 		if kwargs:
@@ -577,11 +596,65 @@ class _CmdChangelogGetGroups(object):
 	def as_dict(self):
 		curr_dict = {}
 		curr_dict[u'changelogGetGroups'] = []
+		return curr_dict
+
+	def get_tag(self):
+		return self.tag
+
+	def get_type(self):
+		return _CmdChangelogGetGroups.CMD_TYPE
+
+
+
+class _CmdChangelogRead(object):
+	""" one unique "changelogRead" request, parsed from **kwargs """
+
+	CMD_TYPE = u'changelogRead'
+
+	def __init__(self, msghandler, group, start, **kwargs):
+		# parsing of kwargs: help from https://stackoverflow.com/questions/5624912/kwargs-parsing-best-practice
+		# =>since all fields in "changelogRead" object and all it's subobjects are unique, we could handle them in the same loop
+		self.group = u'' + group
+
+		# convert datetime.datetime object to ISO 8601 format
+		try:
+			self.start = u'' + start.isoformat()
+		except AttributeError:
+			# now we assume it's already a string
+			self.start = u'' + start
+
+		self.request = {}
+		self.tag = msghandler.prepare_tag()
+
+		for key in kwargs.keys():
+			# parsing request options
+			val = None
+			if key == u'end':
+				# convert datetime.datetime object to ISO 8601 format
+				val_raw = kwargs.pop(key)
+				try:
+					val = u'' + val_raw.isoformat()
+				except AttributeError:
+					# now we assume it's already a string
+					val = u'' + val_raw
+			else:
+				raise ValueError('field "' + repr(kwargs) + '" is illegal in "changelogRead" request')
+
+			if val:
+				self.request[key] = val
+
+
+	def as_dict(self):
+		# no need to create deep-copy, changes are on same dict
+		curr_dict = self.request
+		curr_dict[u'group'] = self.group
+		curr_dict[u'start'] = self.start
 		curr_dict[u'tag'] = self.tag
 		return curr_dict
 
 	def get_type(self):
-		return _CmdChangelogGetGroups.CMD_TYPE
+		return _CmdChangelogRead.CMD_TYPE
+
 
 
 
@@ -1104,6 +1177,44 @@ class RespChangelogGetGroups(_Mydict, _Response):
 		return u'RespChangelogGetGroups(' + repr(self._values_dict) + u')'
 
 
+class RespChangelogRead(_Mydict, _Response):
+	_fields = (u'group',
+	           u'changelog',
+	           u'message',
+	           u'tag')
+
+	def __init__(self, **kwargs):
+		_Mydict.__init__(self, **kwargs)
+
+		for field in RespChangelogRead._fields:
+			try:
+				if field == u'changelog':
+					obj_list = kwargs.pop(field)
+					if obj_list:
+						# parse response as "protocol" format (we don't have to care for "alarm" format)
+						# datapoint has only protocol
+						self._values_dict[field] = Changelog_Protocol(obj_list)
+					else:
+						# changelog is an empty list, we have no changelogs...
+						self._values_dict[field] = []
+				else:
+					# default: no special treatment
+					self._values_dict[field] = kwargs.pop(field)
+			except KeyError:
+				# argument was not in response =>setting default value
+				print('\tDEBUG: RespChangelogRead constructor: field "' + field + '" is not in response.')
+				self._values_dict[field] = None
+
+		# init all common fields
+		# (explicit calling _Response's constructor, because "super" would call "_Mydict"...)
+		_Response.__init__(self, **kwargs)
+
+	def __repr__(self):
+		""" developer representation of this object """
+		return u'RespChangelogRead(' + repr(self._values_dict) + u')'
+
+
+
 
 
 class Subscription(axel.Event):
@@ -1375,6 +1486,25 @@ class _MessageHandler(object):
 			raise Exception('Please report this bug of pyVisiToolkit!')
 
 
+	def changelog_Read(self, group, start, timeout=10, **kwargs):
+		""" get protocol entries in given changelog group """
+
+		req = _Request(whois=self._whois_str, user=self._user_str).addCmd(
+			_CmdChangelogRead(msghandler=self, group=group, start=start, **kwargs))
+		self._send_frame(req)
+
+		try:
+			tag = req.get_tags()[0]
+			return self._busy_wait_for_response(tag, timeout)
+		except IndexError:
+			# something went wrong...
+			if DEBUGGING:
+				print('error in changelog_Read(): len(req.get_tags())=' + str(len(req.get_tags())) + ', too much or too few responses? sending more than one command per request is not implemented!')
+			raise Exception('Please report this bug of pyVisiToolkit!')
+
+
+
+
 
 	def handle(self, msg):
 		payload_dict = json.loads(msg.decode('utf8'))
@@ -1387,12 +1517,22 @@ class _MessageHandler(object):
 			                            (u'delete', RespDel),
 			                            (u'subscribe', RespSub),
 			                            (u'unsubscribe', RespUnsub),
-			                            (u'changelogGetGroups', RespChangelogGetGroups)]:
+			                            (u'changelogGetGroups', RespChangelogGetGroups),
+			                            (u'changelogRead', RespChangelogRead)]:
 				if resp_type in payload_dict:
 					# handling responses to command
 
 					# preparation: reset response list
 					self._curr_response.clear()
+
+					# special treatment: when whole frame is tagged with helper-dictionary,
+					# then we need to copy it back to all tagless commands
+					# (I don't know why not all commands have an own tag...?!?)
+					# =>DMS must return us same helper-dictionary as built in _Request.as_dict(),
+					#   and all tagless commands in same order (array in JSON must keep ordering)
+					if resp_type == _CmdChangelogGetGroups.CMD_TYPE:
+						for idx, resp_obj in enumerate(payload_dict[resp_type]):
+							resp_obj[u'tag'] = payload_dict[u'tag'][_CmdChangelogGetGroups.CMD_TYPE][idx]
 
 					for response in payload_dict[resp_type]:
 						if u'tag' in response:
@@ -1574,6 +1714,9 @@ class DMSClient(object):
 		""" get list of available changelog groups """
 		return self._msghandler.changelog_GetGroups(**kwargs)
 
+	def changelog_Read(self, group, start, **kwargs):
+		""" get protocol entries in given changelog group """
+		return self._msghandler.changelog_Read(group, start, **kwargs)
 
 	def _send_message(self, msg):
 		if self.ready_to_send.wait(timeout=10):     # timeout in seconds
@@ -1618,7 +1761,7 @@ class DMSClient(object):
 
 if __name__ == '__main__':
 
-	test_set = set(['ws', 16])
+	test_set = set(['ws', 17])
 
 	if 'ws' in test_set:
 		myClient = DMSClient(u'test', u'user')
@@ -1822,4 +1965,15 @@ if __name__ == '__main__':
 		print('\nTesting retrieving available changelog groups:')
 		DEBUGGING = True
 		response = myClient.changelog_GetGroups()
+		print('response: ' + repr(response))
+
+
+
+	if 17 in test_set:
+		print('\nTesting retrieving available protocol entries in changelog group:')
+		DEBUGGING = True
+		response = myClient.changelog_Read(group=u'Hand',
+		                                   start="2017-12-05T19:00:00,000+02:00",
+		                                   #end="2017-12-10T20:30:00,000+02:00"
+		                                   )
 		print('response: ' + repr(response))
