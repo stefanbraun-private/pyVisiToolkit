@@ -36,10 +36,35 @@ import thread
 import threading
 import collections
 import dateutil.parser, datetime
+import logging
 
 # events handling https://github.com/axel-events/axel
 # =>installed with pip from https://anaconda.org/pypi/axel
 import axel
+
+
+# setup of logging
+# (based on tutorial https://docs.python.org/2/howto/logging.html )
+# create logger
+logger = logging.getLogger('dms.dmswebsocket')
+logger.setLevel(logging.DEBUG)
+
+# create console handler and set level to debug
+ch = logging.StreamHandler()
+ch.setLevel(logging.INFO)
+
+# create formatter
+formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+
+# add formatter to ch
+ch.setFormatter(formatter)
+
+# add ch to logger
+logger.addHandler(ch)
+
+
+
+
 
 
 TESTMSG = (u'{ "get": [ {"path":"System:Time"} ] }')
@@ -707,7 +732,7 @@ class HistData_detail(_Mylist):
 						curr_dict[field] = dateutil.parser.parse(histobj[field])
 					except ValueError:
 						# something went wrong, conversion into a datetime.datetime() object isn't possible
-						print('constructor of HistData_detail(): ERROR: timestamp in current response could not get parsed as valid datetime.datetime() object!')
+						logger.exception('constructor of HistData_detail(): ERROR: timestamp in current response could not get parsed as valid datetime.datetime() object!')
 						curr_dict[field] = None
 				else:
 					# other fields are number or string, currently no special treatment
@@ -715,7 +740,7 @@ class HistData_detail(_Mylist):
 						curr_dict[field] = histobj[field]
 					except KeyError:
 						# something went wrong, a mandatory field is missing...
-						print('constructor of HistData_detail(): ERROR: mandatory field "' + field + '" is missing in current response!')
+						logger.exception('constructor of HistData_detail(): ERROR: mandatory field "' + field + '" is missing in current response!')
 						# argument was not in response =>setting default value
 						curr_dict[field] = None
 			# save current dict, begin a new one
@@ -745,8 +770,7 @@ class HistData_compact(_Mylist):
 				stamp = dateutil.parser.parse(stamp_str)
 			except ValueError:
 				# something went wrong, conversion into a datetime.datetime() object isn't possible
-				print(
-				'constructor of HistData_compact(): ERROR: timestamp in current response could not get parsed as valid datetime.datetime() object!')
+				logger.exception('constructor of HistData_compact(): ERROR: timestamp in current response could not get parsed as valid datetime.datetime() object!')
 				stamp = None
 
 			curr_tuple = (stamp, value)
@@ -777,8 +801,7 @@ class Changelog_Protocol(_Mylist):
 						curr_dict[field] = dateutil.parser.parse(obj[field])
 					except ValueError:
 						# something went wrong, conversion into a datetime.datetime() object isn't possible
-						print(
-						'constructor of Changelog_Protocol(): ERROR: timestamp in current response could not get parsed as valid datetime.datetime() object!')
+						logger.exception('constructor of Changelog_Protocol(): ERROR: timestamp in current response could not get parsed as valid datetime.datetime() object!')
 						curr_dict[field] = None
 				elif field == u'path':
 					# path is optional when only one datapoint was requested
@@ -792,8 +815,7 @@ class Changelog_Protocol(_Mylist):
 						curr_dict[field] = obj[field]
 					except KeyError:
 						# something went wrong, a mandatory field is missing...
-						print(
-						'constructor of Changelog_Protocol(): ERROR: mandatory field "' + field + '" is missing in current response!')
+						logger.exception('constructor of Changelog_Protocol(): ERROR: mandatory field "' + field + '" is missing in current response!')
 						# argument was not in response =>setting default value
 						curr_dict[field] = None
 			# save current dict, begin a new one
@@ -840,8 +862,7 @@ class Changelog_Alarm(Changelog_Protocol):
 						curr_dict[field] = obj[field]
 					except KeyError:
 						# something went wrong, a mandatory field is missing...
-						print(
-							'constructor of Changelog_Alarm(): ERROR: mandatory field "' + field + '" is missing in current response!')
+						logger.exception('constructor of Changelog_Alarm(): ERROR: mandatory field "' + field + '" is missing in current response!')
 						# argument was not in response =>setting default value
 						curr_dict[field] = None
 			# save current dict (combine it into existing one already filled by superclass)
@@ -880,7 +901,7 @@ class _Response(object):
 				self._values_dict[field] = kwargs.pop(field)
 			except KeyError:
 				# something went wrong, a mandatory field is missing... =>set error code
-				print('constructor of CmdResponse(): ERROR: mandatory field "' + field + '" is missing in current response!')
+				logger.exception('constructor of CmdResponse(): ERROR: mandatory field "' + field + '" is missing in current response!')
 				self._values_dict[u'code'] = _Response.CODE_ERROR
 
 		# some sanity checks
@@ -888,11 +909,11 @@ class _Response(object):
 		                                      _Response.CODE_NOPERM,
 		                                      _Response.CODE_NOTFOUND,
 		                                      _Response.CODE_ERROR):
-			print('constructor of CmdResponse(): ERROR: field "code" in current response contains unknown value "' + repr(self._values_dict[u'code']) + '"!')
+			logger.error('constructor of CmdResponse(): ERROR: field "code" in current response contains unknown value "' + repr(self._values_dict[u'code']) + '"!')
 			# FIXME: what should we do if response code is unknown? Perhaps it's an unsupported JSON Data Exchange protocol?
 
 		if kwargs:
-			print('constructor of CmdResponse(): WARNING: these fields in current response are unknown, perhaps unsupported JSON Data Exchange protocol: "' + repr(kwargs) + '"!')
+			logger.warn('constructor of CmdResponse(): WARNING: these fields in current response are unknown, perhaps unsupported JSON Data Exchange protocol: "' + repr(kwargs) + '"!')
 
 
 class RespGet(_Mydict, _Response):
@@ -956,8 +977,7 @@ class RespGet(_Mydict, _Response):
 					self._values_dict[field] = kwargs.pop(field)
 			except KeyError:
 				# argument was not in response =>setting default value
-				if DEBUGGING:
-					print('\tDEBUG: RespGet constructor: field "' + field + '" is not in response.')
+				logger.debug('RespGet() constructor: field "' + field + '" is not in response.')
 				self._values_dict[field] = None
 
 		# init all common fields
@@ -994,7 +1014,7 @@ class RespSet(_Mydict, _Response):
 					self._values_dict[field] = kwargs.pop(field)
 			except KeyError:
 				# argument was not in response =>setting default value
-				print('\tDEBUG: RespSet constructor: field "' + field + '" is not in response.')
+				logger.debug('RespSet() constructor: field "' + field + '" is not in response.')
 				self._values_dict[field] = None
 
 		# init all common fields
@@ -1021,7 +1041,7 @@ class RespRen(_Mydict, _Response):
 				self._values_dict[field] = kwargs.pop(field)
 			except KeyError:
 				# argument was not in response =>setting default value
-				print('\tDEBUG: RespRen constructor: field "' + field + '" is not in response.')
+				logger.debug('RespRen() constructor: field "' + field + '" is not in response.')
 				self._values_dict[field] = None
 
 		# init all common fields
@@ -1047,7 +1067,7 @@ class RespDel(_Mydict, _Response):
 				self._values_dict[field] = kwargs.pop(field)
 			except KeyError:
 				# argument was not in response =>setting default value
-				print('\tDEBUG: RespDel constructor: field "' + field + '" is not in response.')
+				logger.debug('RespDel() constructor: field "' + field + '" is not in response.')
 				self._values_dict[field] = None
 
 		# init all common fields
@@ -1087,14 +1107,14 @@ class RespSub(_Mydict, _Response):
 					try:
 						self._values_dict[field] = Query(**query_dict)
 					except ValueError as ex:
-						print('\tWARNING: in RespSub(): consctructor of Query() found unknown fields in current response, perhaps unsupported JSON Data Exchange protocol!')
+						logger.warn('RespSub(): consctructor of Query() found unknown fields in current response, perhaps unsupported JSON Data Exchange protocol!')
 						raise ex
 				else:
 					# default: no special treatment
 					self._values_dict[field] = kwargs.pop(field)
 			except KeyError:
 				# argument was not in response =>setting default value
-				print('\tDEBUG: RespSub constructor: field "' + field + '" is not in response.')
+				logger.debug('RespSub() constructor: field "' + field + '" is not in response.')
 				self._values_dict[field] = None
 
 		# init all common fields
@@ -1133,14 +1153,14 @@ class RespUnsub(_Mydict, _Response):
 					try:
 						self._values_dict[field] = Query(**query_dict)
 					except ValueError as ex:
-						print('\tWARNING: in RespUnsub(): constructor of Query() found unknown fields in current response, perhaps unsupported JSON Data Exchange protocol!')
+						logger.warn('RespUnsub(): constructor of Query() found unknown fields in current response, perhaps unsupported JSON Data Exchange protocol!')
 						raise ex
 				else:
 					# default: no special treatment
 					self._values_dict[field] = kwargs.pop(field)
 			except KeyError:
 				# argument was not in response =>setting default value
-				print('\tDEBUG: RespUnsub constructor: field "' + field + '" is not in response.')
+				logger.debug('RespUnsub() constructor: field "' + field + '" is not in response.')
 				self._values_dict[field] = None
 
 		# init all common fields
@@ -1165,7 +1185,7 @@ class RespChangelogGetGroups(_Mydict, _Response):
 				self._values_dict[field] = kwargs.pop(field)
 			except KeyError:
 				# argument was not in response =>setting default value
-				print('\tDEBUG: RespChangelogGetGroups constructor: field "' + field + '" is not in response.')
+				logger.debug('RespChangelogGetGroups() constructor: field "' + field + '" is not in response.')
 				self._values_dict[field] = None
 
 		# init all common fields
@@ -1202,7 +1222,7 @@ class RespChangelogRead(_Mydict, _Response):
 					self._values_dict[field] = kwargs.pop(field)
 			except KeyError:
 				# argument was not in response =>setting default value
-				print('\tDEBUG: RespChangelogRead constructor: field "' + field + '" is not in response.')
+				logger.debug('RespChangelogRead() constructor: field "' + field + '" is not in response.')
 				self._values_dict[field] = None
 
 		# init all common fields
@@ -1301,7 +1321,7 @@ class DMSEvent(_Mydict):
 					self._values_dict[field] = kwargs[field]
 			except KeyError:
 				# argument was not in response =>setting default value
-				print('\tDEBUG: DMSEvent constructor: field "' + field + '" is not in response.')
+				logger.debug('DMSEvent() constructor: field "' + field + '" is not in response.')
 				self._values_dict[field] = None
 
 		# sanity check:
@@ -1310,9 +1330,7 @@ class DMSEvent(_Mydict):
 		                                      DMSEvent.CODE_CREATE,
 		                                      DMSEvent.CODE_RENAME,
 		                                      DMSEvent.CODE_DELETE):
-					print(
-						'constructor of DMSEvent(): ERROR: field "code" in current response contains unknown value "' + repr(
-							self._values_dict[u'code']) + '"!')
+			logger.error('constructor of DMSEvent(): ERROR: field "code" in current response contains unknown value "' + repr(self._values_dict[u'code']) + '"!')
 
 	def __repr__(self):
 		""" developer representation of this object """
@@ -1373,8 +1391,7 @@ class _MessageHandler(object):
 			return self._busy_wait_for_response(tag, timeout)
 		except IndexError:
 			# something went wrong...
-			if DEBUGGING:
-				print('error in dp_get(): len(req.get_tags())=' + str(len(req.get_tags())) + ', too much or too few responses? sending more than one command per request is not implemented!')
+			logger.error('error in dp_get(): len(req.get_tags())=' + str(len(req.get_tags())) + ', too much or too few responses? sending more than one command per request is not implemented!')
 			raise Exception('Please report this bug of pyVisiToolkit!')
 
 
@@ -1394,8 +1411,7 @@ class _MessageHandler(object):
 			return self._busy_wait_for_response(tag, timeout)
 		except IndexError:
 			# something went wrong...
-			if DEBUGGING:
-				print('error in dp_set(): len(req.get_tags())=' + str(len(req.get_tags())) + ', too much or too few responses? sending more than one command per request is not implemented!')
+			logger.error('error in dp_set(): len(req.get_tags())=' + str(len(req.get_tags())) + ', too much or too few responses? sending more than one command per request is not implemented!')
 			raise Exception('Please report this bug of pyVisiToolkit!')
 
 
@@ -1411,8 +1427,7 @@ class _MessageHandler(object):
 			return self._busy_wait_for_response(tag, timeout)
 		except IndexError:
 			# something went wrong...
-			if DEBUGGING:
-				print('error in dp_del(): len(req.get_tags())=' + str(len(req.get_tags())) + ', too much or too few responses? sending more than one command per request is not implemented!')
+			logger.error('error in dp_del(): len(req.get_tags())=' + str(len(req.get_tags())) + ', too much or too few responses? sending more than one command per request is not implemented!')
 			raise Exception('Please report this bug of pyVisiToolkit!')
 
 
@@ -1428,8 +1443,7 @@ class _MessageHandler(object):
 			return self._busy_wait_for_response(tag, timeout)
 		except IndexError:
 			# something went wrong...
-			if DEBUGGING:
-				print('error in dp_ren(): len(req.get_tags())=' + str(len(req.get_tags())) + ', too much or too few responses? sending more than one command per request is not implemented!')
+			logger.error('error in dp_ren(): len(req.get_tags())=' + str(len(req.get_tags())) + ', too much or too few responses? sending more than one command per request is not implemented!')
 			raise Exception('Please report this bug of pyVisiToolkit!')
 
 
@@ -1445,9 +1459,7 @@ class _MessageHandler(object):
 			return self._busy_wait_for_response(tag, timeout)
 		except IndexError:
 			# something went wrong...
-			if DEBUGGING:
-				print('error in dp_ren(): len(req.get_tags())=' + str(len(
-					req.get_tags())) + ', too much or too few responses? sending more than one command per request is not implemented!')
+			logger.error('error in dp_ren(): len(req.get_tags())=' + str(len(req.get_tags())) + ', too much or too few responses? sending more than one command per request is not implemented!')
 			raise Exception('Please report this bug of pyVisiToolkit!')
 
 
@@ -1463,9 +1475,7 @@ class _MessageHandler(object):
 			return self._busy_wait_for_response(tag, timeout)
 		except IndexError:
 			# something went wrong...
-			if DEBUGGING:
-				print('error in dp_ren(): len(req.get_tags())=' + str(len(
-					req.get_tags())) + ', too much or too few responses? sending more than one command per request is not implemented!')
+			logger.error('error in dp_ren(): len(req.get_tags())=' + str(len(req.get_tags())) + ', too much or too few responses? sending more than one command per request is not implemented!')
 			raise Exception('Please report this bug of pyVisiToolkit!')
 
 
@@ -1481,8 +1491,7 @@ class _MessageHandler(object):
 			return self._busy_wait_for_response(tag, timeout)
 		except IndexError:
 			# something went wrong...
-			if DEBUGGING:
-				print('error in changelog_GetGroups(): len(req.get_tags())=' + str(len(req.get_tags())) + ', too much or too few responses? sending more than one command per request is not implemented!')
+			logger.error('error in changelog_GetGroups(): len(req.get_tags())=' + str(len(req.get_tags())) + ', too much or too few responses? sending more than one command per request is not implemented!')
 			raise Exception('Please report this bug of pyVisiToolkit!')
 
 
@@ -1498,8 +1507,7 @@ class _MessageHandler(object):
 			return self._busy_wait_for_response(tag, timeout)
 		except IndexError:
 			# something went wrong...
-			if DEBUGGING:
-				print('error in changelog_Read(): len(req.get_tags())=' + str(len(req.get_tags())) + ', too much or too few responses? sending more than one command per request is not implemented!')
+			logger.error('error in changelog_Read(): len(req.get_tags())=' + str(len(req.get_tags())) + ', too much or too few responses? sending more than one command per request is not implemented!')
 			raise Exception('Please report this bug of pyVisiToolkit!')
 
 
@@ -1546,33 +1554,30 @@ class _MessageHandler(object):
 								if self._curr_response.msg_tag and self._curr_response.resp_list:
 									# need to save last responses
 									if curr_tag in self._pending_response_dict:
-										if DEBUGGING:
-											print('\tmessage handler: found different tags in response. Storing response for other thread...')
+										logger.debug('message handler: found different tags in response. Storing response for other thread...')
 										with self._pending_response_lock:
 											self._pending_response_dict[curr_tag].response_list = self._curr_response.resp_list
 											# inform other thread
 											self._pending_response_dict[curr_tag].isAvailable.set()
 									else:
-										if DEBUGGING:
-											print('\tmessage handler: ignoring unexpected response "' + repr(self._curr_response.resp_list) + '"...')
+										logger.warn('message handler: ignoring unexpected response "' + repr(self._curr_response.resp_list) + '"...')
 								# begin of new response list
 								self._curr_response.msg_tag = curr_tag
 								self._curr_response.resp_list = [resp_cls(**response)]
 
 						else:
-							if DEBUGGING:
-								print('\tmessage handler: ignoring untagged response "' + repr(response) + '"...')
+							logger.warn('message handler: ignoring untagged response "' + repr(response) + '"...')
 
 
 					# storing collected list for other thread
-					if DEBUGGING:
-						print('\tmessage handler: storing of response for other thread...')
+					logger.debug('message handler: storing of response for other thread...')
 					with self._pending_response_lock:
 						self._pending_response_dict[curr_tag].response_list = self._curr_response.resp_list
 						# inform other thread
 						self._pending_response_dict[curr_tag].isAvailable.set()
 		except Exception as ex:
-			print("exception in _MessageHandler.handle(): " + repr(ex))
+			# help from https://stackoverflow.com/questions/5191830/best-way-to-log-a-python-exception
+			logger.exception("exception occurred in _MessageHandler.handle()")
 
 
 		if u'event' in payload_dict:
@@ -1590,21 +1595,20 @@ class _MessageHandler(object):
 					# (result is tuple of tuples: https://github.com/axel-events/axel/blob/master/axel/axel.py#L122 )
 					if len(sub) > 0:
 						result = sub(event_obj)
-						if DEBUGGING:
-							# FIXME: how to inform caller about exceptions while executing his callbacks?
-							# FIXME: should we use Python logger framework?
-							print('DEBUGGING: _MsgHandler.handle(), result of event-firing on axel.Event object:')
-							for idx, res in enumerate(result):
-								print('=>result of callback number ' + str(idx) + ': ' + repr(res))
+
+						# FIXME: how to inform caller about exceptions while executing his callbacks?
+						# FIXME: should we use Python logger framework?
+						logger.debug('_MsgHandler.handle(): result of event-firing on axel.Event object:')
+						for idx, res in enumerate(result):
+							logger.debug('=>result of callback number ' + str(idx) + ': ' + repr(res))
 					else:
-						if DEBUGGING:
-							print('DEBUGGING: _MsgHandler.handle(), axel.Event object is empty, suppressing event-firing...')
-				except AttributeError as ex:
-					print("exception in _MessageHandler.handle(): DMS-event seems corrupted: " + repr(ex))
-				except KeyError as ex:
-					print("exception in _MessageHandler.handle(): DMS-event is not registered: " + repr(ex))
-				except Exception as ex:
-					print("exception in _MessageHandler.handle(): DMS-event raises " + repr(ex))
+						logger.info('_MsgHandler.handle(): axel.Event object is empty, suppressing event-firing...')
+				except AttributeError:
+					logger.exception("exception in _MessageHandler.handle(): DMS-event seems corrupted")
+				except KeyError:
+					logger.exception("exception in _MessageHandler.handle(): DMS-event is not registered")
+				except Exception:
+					logger.exception("exception in _MessageHandler.handle() during handling of DMS-event")
 
 
 
@@ -1677,31 +1681,31 @@ class DMSClient(object):
 		# executing WebSocket eventloop in background
 		self._ws_thread = thread.start_new_thread(self._ws.run_forever, ())
 		# FIXME: how to return caller a non-reachable WebSocket server?
-		if DEBUGGING:
-			print("WebSocket connection will be established in background...")
+		logger.info("WebSocket connection will be established in background...")
 
 	# API
-	def dp_get(self, path, **kwargs):
+	def dp_get(self, path, timeout=10, **kwargs):
 		""" read datapoint value(s) """
-		return self._msghandler.dp_get(path, **kwargs)
+		return self._msghandler.dp_get(path, timeout=timeout, **kwargs)
 
-	def dp_set(self, path, **kwargs):
+	def dp_set(self, path, timeout=10, **kwargs):
 		""" write datapoint value(s) """
-		return self._msghandler.dp_set(path, **kwargs)
+		return self._msghandler.dp_set(path, timeout=timeout, **kwargs)
 
-	def dp_del(self, path, recursive, **kwargs):
+	def dp_del(self, path, recursive, timeout=10, **kwargs):
 		""" delete datapoint(s) """
-		return self._msghandler.dp_del(path, recursive, **kwargs)
+		return self._msghandler.dp_del(path, recursive, timeout=timeout, **kwargs)
 
-	def dp_ren(self, path, newPath, **kwargs):
+	def dp_ren(self, path, newPath, timeout=10, **kwargs):
 		""" rename datapoint(s) """
-		return self._msghandler.dp_ren(path, newPath, **kwargs)
+		return self._msghandler.dp_ren(path, newPath, timeout=timeout, **kwargs)
 
-	def get_dp_subscription(self, path, **kwargs):
+	def get_dp_subscription(self, path, timeout=10, **kwargs):
 		""" subscribe monitoring of datapoints(s) """
 		# FIXME: now we care only the first response... is this ok in every case?
-		response = self._msghandler.dp_sub(path, **kwargs)[0]
-		print('DEBUGGING: type(response)=' + repr(type(response)) + ', repr(response)=' + repr(response))
+		response = self._msghandler.dp_sub(path, timeout=timeout, **kwargs)[0]
+		if DEBUGGING:
+			print('DEBUGGING: get_dp_subscription(): type(response)=' + repr(type(response)) + ', repr(response)=' + repr(response))
 		if response["code"] == u'ok':
 			# DMS accepted subscription
 			sub = Subscription(msghandler=self._msghandler, sub_response=response)
@@ -1710,44 +1714,38 @@ class DMSClient(object):
 		else:
 			raise Exception(u'DMS ignored subscription of "' + path + '" with error "' + response.code + '"!')
 
-	def changelog_GetGroups(self, **kwargs):
+	def changelog_GetGroups(self, timeout=10, **kwargs):
 		""" get list of available changelog groups """
-		return self._msghandler.changelog_GetGroups(**kwargs)
+		return self._msghandler.changelog_GetGroups(timeout=timeout, **kwargs)
 
-	def changelog_Read(self, group, start, **kwargs):
+	def changelog_Read(self, group, start, timeout=10, **kwargs):
 		""" get protocol entries in given changelog group """
-		return self._msghandler.changelog_Read(group, start, **kwargs)
+		return self._msghandler.changelog_Read(group, start, timeout=timeout, **kwargs)
 
 	def _send_message(self, msg):
 		if self.ready_to_send.wait(timeout=10):     # timeout in seconds
-			if DEBUGGING:
-				print('DMSClient._send_message(): sending request "' + repr(msg) + '"')
+			logger.debug('DMSClient._send_message(): sending request "' + repr(msg) + '"')
 			self._ws.send(msg)
 		else:
-			if DEBUGGING:
-				print('DMSClient._send_message(): ERROR WebSocket not ready for sending request "' + repr(msg) + '"')
+			logger.error('DMSClient._send_message(): ERROR WebSocket not ready for sending request "' + repr(msg) + '"')
 		# FIXME: how should we inform user about WebSocket problems?
 		# e.g. giving back IOError exception?
 		# or raw websocket-exceptions https://github.com/websocket-client/websocket-client/blob/master/websocket/_exceptions.py
 
 
 	def _cb_on_message(self, ws, message):
-		if DEBUGGING:
-			print("_on_message(): " + message)
+		logger.debug("websocket callback _on_message(): " + message)
 		self._msghandler.handle(message)
 
 	def _cb_on_error(self, ws, error):
-		if DEBUGGING:
-			print("_on_error(): " + error)
+		logger.error("websocket callback _on_error(): " + error)
 
 	def _cb_on_open(self, ws):
-		if DEBUGGING:
-			print("_on_open(): WebSocket connection is established.")
+		logger.info("websocket callback _on_open(): WebSocket connection is established.")
 		self.ready_to_send.set()
 
 	def _cb_on_close(self, ws):
-		if DEBUGGING:
-			print("_on_close(): server closed connection =>shutting down client thread")
+		logger.info("websocket callback _on_close(): server closed connection =>shutting down client thread")
 		self.ready_to_send.clear()
 		self._ws_thread.exit()
 
@@ -1761,7 +1759,9 @@ class DMSClient(object):
 
 if __name__ == '__main__':
 
-	test_set = set(['ws', 17])
+
+	test_set = set(['ws'] + range(18))
+	#test_set = set(['ws', 7])
 
 	if 'ws' in test_set:
 		myClient = DMSClient(u'test', u'user')
@@ -1828,7 +1828,8 @@ if __name__ == '__main__':
 	if 5 in test_set:
 		print('\nTesting writing of DMS datapoint:')
 		response = myClient.dp_set(path="MSR01:Test_str",
-		                           value=80*"x",
+		                           #value=80*"x",
+		                           value="abc",
 		                           create=True)
 		print('response: ' + repr(response))
 
