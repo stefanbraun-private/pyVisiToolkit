@@ -77,6 +77,9 @@ DMS_PORT = 9020             # cleartext HTTP or WebSocket
 DMS_HOST = "127.0.0.1"      # local connection: doesn't need authentification
 DMS_BASEPATH = "/json_data" # default for HTTP and WebSocket
 
+# default timeout in seconds for DMS JSON Data Exchange requests
+TIMEOUT = 60
+
 
 # constants for retrieving extended infos ("extInfos")
 # implementing something similar as in "sticky"-options of http://effbot.org/tkinterbook/grid.htm
@@ -1380,7 +1383,7 @@ class _MessageHandler(object):
 			self.response_list = []
 
 
-	def dp_get(self, path, timeout=10, **kwargs):
+	def dp_get(self, path, timeout=TIMEOUT, **kwargs):
 		""" read datapoint value(s) """
 
 		req = _Request(whois=self._whois_str, user=self._user_str).addCmd(_CmdGet(msghandler=self, path=path, **kwargs))
@@ -1395,7 +1398,7 @@ class _MessageHandler(object):
 			raise Exception('Please report this bug of pyVisiToolkit!')
 
 
-	def dp_set(self, path, value, timeout=10, **kwargs):
+	def dp_set(self, path, value, timeout=TIMEOUT, **kwargs):
 		""" write datapoint value(s) """
 		# Remarks: datatype in DMS is taken from datatype of "value" (field "type" is optional)
 		# Remarks: datatype STR: 80 chars could be serialized by DMS into Promos.dms file for permament storage.
@@ -1415,7 +1418,7 @@ class _MessageHandler(object):
 			raise Exception('Please report this bug of pyVisiToolkit!')
 
 
-	def dp_del(self, path, recursive, timeout=10, **kwargs):
+	def dp_del(self, path, recursive, timeout=TIMEOUT, **kwargs):
 		""" delete datapoint(s) """
 
 		req = _Request(whois=self._whois_str, user=self._user_str).addCmd(
@@ -1431,7 +1434,7 @@ class _MessageHandler(object):
 			raise Exception('Please report this bug of pyVisiToolkit!')
 
 
-	def dp_ren(self, path, newPath, timeout=10, **kwargs):
+	def dp_ren(self, path, newPath, timeout=TIMEOUT, **kwargs):
 		""" rename datapoint(s) """
 
 		req = _Request(whois=self._whois_str, user=self._user_str).addCmd(
@@ -1447,7 +1450,7 @@ class _MessageHandler(object):
 			raise Exception('Please report this bug of pyVisiToolkit!')
 
 
-	def dp_sub(self, path, timeout=10, **kwargs):
+	def dp_sub(self, path, timeout=TIMEOUT, **kwargs):
 		""" subscribe monitoring of datapoints(s) """
 
 		req = _Request(whois=self._whois_str, user=self._user_str).addCmd(
@@ -1464,7 +1467,7 @@ class _MessageHandler(object):
 
 
 
-	def _dp_unsub(self, path, tag, timeout=10, **kwargs):
+	def _dp_unsub(self, path, tag, timeout=TIMEOUT, **kwargs):
 		""" unsubscribe monitoring of datapoint(s) """
 		# =>called by Subscription.unsubscribe()
 		req = _Request(whois=self._whois_str, user=self._user_str).addCmd(
@@ -1479,7 +1482,7 @@ class _MessageHandler(object):
 			raise Exception('Please report this bug of pyVisiToolkit!')
 
 
-	def changelog_GetGroups(self, timeout=10, **kwargs):
+	def changelog_GetGroups(self, timeout=TIMEOUT, **kwargs):
 		""" get list of available changelog groups """
 
 		req = _Request(whois=self._whois_str, user=self._user_str).addCmd(
@@ -1495,7 +1498,7 @@ class _MessageHandler(object):
 			raise Exception('Please report this bug of pyVisiToolkit!')
 
 
-	def changelog_Read(self, group, start, timeout=10, **kwargs):
+	def changelog_Read(self, group, start, timeout=TIMEOUT, **kwargs):
 		""" get protocol entries in given changelog group """
 
 		req = _Request(whois=self._whois_str, user=self._user_str).addCmd(
@@ -1684,23 +1687,23 @@ class DMSClient(object):
 		logger.info("WebSocket connection will be established in background...")
 
 	# API
-	def dp_get(self, path, timeout=10, **kwargs):
+	def dp_get(self, path, timeout=TIMEOUT, **kwargs):
 		""" read datapoint value(s) """
 		return self._msghandler.dp_get(path, timeout=timeout, **kwargs)
 
-	def dp_set(self, path, timeout=10, **kwargs):
+	def dp_set(self, path, timeout=TIMEOUT, **kwargs):
 		""" write datapoint value(s) """
 		return self._msghandler.dp_set(path, timeout=timeout, **kwargs)
 
-	def dp_del(self, path, recursive, timeout=10, **kwargs):
+	def dp_del(self, path, recursive, timeout=TIMEOUT, **kwargs):
 		""" delete datapoint(s) """
 		return self._msghandler.dp_del(path, recursive, timeout=timeout, **kwargs)
 
-	def dp_ren(self, path, newPath, timeout=10, **kwargs):
+	def dp_ren(self, path, newPath, timeout=TIMEOUT, **kwargs):
 		""" rename datapoint(s) """
 		return self._msghandler.dp_ren(path, newPath, timeout=timeout, **kwargs)
 
-	def get_dp_subscription(self, path, timeout=10, **kwargs):
+	def get_dp_subscription(self, path, timeout=TIMEOUT, **kwargs):
 		""" subscribe monitoring of datapoints(s) """
 		# FIXME: now we care only the first response... is this ok in every case?
 		response = self._msghandler.dp_sub(path, timeout=timeout, **kwargs)[0]
@@ -1714,11 +1717,11 @@ class DMSClient(object):
 		else:
 			raise Exception(u'DMS ignored subscription of "' + path + '" with error "' + response.code + '"!')
 
-	def changelog_GetGroups(self, timeout=10, **kwargs):
+	def changelog_GetGroups(self, timeout=TIMEOUT, **kwargs):
 		""" get list of available changelog groups """
 		return self._msghandler.changelog_GetGroups(timeout=timeout, **kwargs)
 
-	def changelog_Read(self, group, start, timeout=10, **kwargs):
+	def changelog_Read(self, group, start, timeout=TIMEOUT, **kwargs):
 		""" get protocol entries in given changelog group """
 		return self._msghandler.changelog_Read(group, start, timeout=timeout, **kwargs)
 
@@ -1728,9 +1731,12 @@ class DMSClient(object):
 			self._ws.send(msg)
 		else:
 			logger.error('DMSClient._send_message(): ERROR WebSocket not ready for sending request "' + repr(msg) + '"')
+			raise IOError('DMSClient._send_message(): ERROR WebSocket not ready for sending request')
 		# FIXME: how should we inform user about WebSocket problems?
-		# e.g. giving back IOError exception?
-		# or raw websocket-exceptions https://github.com/websocket-client/websocket-client/blob/master/websocket/_exceptions.py
+		# FIXME: when DMS is not reachable then user gets an IOError after the self.ready_to_send.wait()-timeout,
+		#        but during this wait state the websocket client thread has died much earlier with callback "on_close"...
+		#        =>we should interrupt this waiting earlier... we should do a better thread synchronization....
+		# what about raw websocket-exceptions https://github.com/websocket-client/websocket-client/blob/master/websocket/_exceptions.py
 
 
 	def _cb_on_message(self, ws, message):
@@ -1747,24 +1753,35 @@ class DMSClient(object):
 	def _cb_on_close(self, ws):
 		logger.info("websocket callback _on_close(): server closed connection =>shutting down client thread")
 		self.ready_to_send.clear()
-		self._ws_thread.exit()
+		self._exit_ws_thread()
 
 	def __del__(self):
 		"""" closing websocket connection on object destruction """
 		self._ws.close()
 		time.sleep(1)
-		self._ws_thread.exit()
+		self._exit_ws_thread()
+
+	def _exit_ws_thread(self):
+		# FIXME: this function is never called from callbacks... But why?
+		logger.debug("exiting websocket thread...")
+		for curr_thread in threading.enumerate():
+			if curr_thread.ident == self._ws_thread:
+				if curr_thread.is_alive():
+					curr_thread.exit()
+				else:
+					logger.debug("websocket thread was already dead.")
+				break
 
 
 
 if __name__ == '__main__':
 
 
-	test_set = set(['ws'] + range(18))
-	#test_set = set(['ws', 7])
+	#test_set = set(['ws'] + range(18))
+	test_set = set(['ws', 1])
 
 	if 'ws' in test_set:
-		myClient = DMSClient(u'test', u'user')
+		myClient = DMSClient(u'test', u'user', dms_port_int=1234)
 		#myClient = DMSClient(u'test', u'user', dms_host_str="192.168.10.173", dms_port_int=1234)
 		print('\n=>WebSocket connection runs now in background...')
 
