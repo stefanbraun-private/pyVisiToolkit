@@ -47,6 +47,7 @@ from twisted.internet import reactor, defer
 import json
 import time
 import uuid
+import logging
 
 from crochet import wait_for, run_in_reactor, setup
 setup()
@@ -415,6 +416,9 @@ if __name__ == '__main__':
 	import sys
 
 	#log.startLogging(sys.stdout)
+
+	# example for logging on https://crochet.readthedocs.io/en/stable/introduction.html
+	logging.basicConfig(stream=sys.stderr, level=logging.DEBUG)
 	myClient = DMSClient(u'test', u'user', dms_host_str='192.168.10.181')
 	print('\n=>WebSocket connection runs now in background...')
 	for x in range(3):

@@ -1,0 +1,54 @@
+# DMS_Controlfunction.yml
+#
+# used by "tools.DMS_Controlfunction.py"
+# (part of pyVisiToolkit)
+#
+# help for YAML: https://learnxinyminutes.com/docs/yaml/
+#                https://symfony.com/doc/current/components/yaml/yaml_format.html
+# =>indention is always done with two spaces, no tabs!
+#
+# =>about inheritation: referencing to an anchor means copying this node or attribut to the second position
+#   behaviour of second position:
+#     -adding new attributes does work
+#     -when replacing an attribute then whole node tree gets replaced with this new data... no overwriting with some changed values possible... :-/
+#
+# USAGE:
+#  name of function: any valid python identifier
+#  vars: minimum one is required, name must be any valid python identifier, DMS-datapoint must exist
+#  expr: any valid Python expression, but beware: it must evaluate to ONE value with datatype of "result"-datapoint, otherwise DMS doesn't accept value... ;-)
+#        =>remark:  short circuit evaluation of logical expressions:        https://docs.python.org/2.7/reference/expressions.html#boolean-operations
+#                   bitwise evaluation of logical expressions:              https://docs.python.org/2.7/reference/expressions.html#binary-bitwise-operations
+#        =>remark2: conditional-expressions are written as "a if x else b"  https://docs.python.org/2.7/reference/expressions.html#conditional-expressions
+#        =>remark3: evaluation order from left to right:                    https://docs.python.org/2.7/reference/expressions.html#evaluation-order
+#        =>remark4: operator precedence (list of all Python operators)      https://docs.python.org/2.7/reference/expressions.html#operator-precedence
+#        =>remark5: value comparison                                        https://docs.python.org/2.7/reference/expressions.html#value-comparisons
+#        =>remark6: the modules "math" and "random" are available (e.g. for random.choice([True, False]), or for constant math.pi)
+#                   https://docs.python.org/2/library/math.html
+#                   https://docs.python.org/2/library/random.html
+#  result: DMS-datapoint must exist
+#
+#
+# EXAMPLES:
+#
+# addition of two DMS datapoints
+####################################
+# functions:
+#   addition_1:
+#     activated: true
+#     vars:
+#       a: "System:Time:Minutes"
+#       b: "System:Time:Seconds"
+#     expr: "a + b"
+#     result: "MSR01:Test"
+
+
+
+functions:
+  test_1:
+  # used during development
+    activated: true
+    vars:
+      a: "System:Time:Minutes"
+      b: "System:Time:Seconds"
+    expr: "a + b"
+    result: "MSR01:Test"

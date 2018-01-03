@@ -78,7 +78,7 @@ DMS_HOST = "127.0.0.1"      # local connection: doesn't need authentification
 DMS_BASEPATH = "/json_data" # default for HTTP and WebSocket
 
 # default timeout in seconds for DMS JSON Data Exchange requests
-TIMEOUT = 60
+TIMEOUT = 300
 
 
 # constants for retrieving extended infos ("extInfos")
@@ -1674,6 +1674,9 @@ class DMSClient(object):
 		self.ready_to_send = threading.Event()
 
 		# based on example on https://github.com/websocket-client/websocket-client
+		# and comments in sourcecode:
+		#   https://github.com/websocket-client/websocket-client/blob/master/websocket/_app.py
+		#   https://github.com/websocket-client/websocket-client/blob/master/websocket/_core.py
 		#websocket.enableTrace(True)
 		ws_URI = u"ws://" + self._dms_host_str + u':' + str(self._dms_port_int) + DMS_BASEPATH
 		self._ws = websocket.WebSocketApp(ws_URI,
@@ -1726,7 +1729,9 @@ class DMSClient(object):
 		return self._msghandler.changelog_Read(group, start, timeout=timeout, **kwargs)
 
 	def _send_message(self, msg):
-		if self.ready_to_send.wait(timeout=10):     # timeout in seconds
+		if not self.ready_to_send.is_set():
+			logger.warn('DMSClient._send_message(): WebSocket not ready for sending, giving it more time for connection establishment...')
+		if self.ready_to_send.wait(timeout=60):     # timeout in seconds
 			logger.debug('DMSClient._send_message(): sending request "' + repr(msg) + '"')
 			self._ws.send(msg)
 		else:
@@ -1781,8 +1786,8 @@ if __name__ == '__main__':
 	test_set = set(['ws', 1])
 
 	if 'ws' in test_set:
-		myClient = DMSClient(u'test', u'user', dms_port_int=1234)
-		#myClient = DMSClient(u'test', u'user', dms_host_str="192.168.10.173", dms_port_int=1234)
+		myClient = DMSClient(u'test', u'user')
+		#myClient = DMSClient(u'test', u'user', dms_host_str="127.0.0.1", dms_port_int=1234)
 		print('\n=>WebSocket connection runs now in background...')
 
 		# while True:
