@@ -3,8 +3,19 @@
 """
 dms.dmswebsocket.py
 
-Copyright (C) 2017 Stefan Braun
+Copyright (C) 2017-2018 Stefan Braun
 
+current state january 4th 2018:
+=>whole functionality of cleartext WebSocket for DMS Data Exchange is implemented and should work
+=>refactoring is needed (improving error handling, websocket handling, logging, ...)
+=>possible ideas for further work:
+  -learn Python3, make code compatible for Python 3
+  -documentation and examples
+  -create clean package for pip, Anaconda Cloud, ...
+  -(caching?) proxy between client(s) and DMS
+  -provide services via ZeroMQ or other IPC to other pyVisiToolkit programms
+  -SSL-WebSocket connection to DMS
+  -...
 
 current state august 8th 2017:
 =>test with WebSocket library https://github.com/websocket-client/websocket-client
@@ -111,7 +122,7 @@ ON_ALL       = 31
 
 
 class _Mydict(collections.Mapping):
-	""" dictionary-like superclass """
+	""" dictionary-like superclass with attribute access """
 
 	# inherit from abstract class "Mapping" for getting dictionary-interface
 	# https://stackoverflow.com/questions/19775685/how-to-correctly-implement-the-mapping-protocol-in-python
@@ -129,6 +140,16 @@ class _Mydict(collections.Mapping):
 
 	def __len__(self):
 		return len(self._values_dict)
+
+	def __getattr__(self, name):
+		# get's called when attribute isn't found
+		# =>convenient way for retrieving element from dictionary!
+		# https://stackoverflow.com/questions/2405590/how-do-i-override-getattr-in-python-without-breaking-the-default-behavior
+		try:
+			return self._values_dict[name]
+		except KeyError:
+			# Default behaviour
+			raise AttributeError
 
 	def __repr__(self):
 		""" developer representation of this object """
@@ -1805,9 +1826,14 @@ if __name__ == '__main__':
 	if 1 in test_set:
 		print('\nTesting creation of Request command:')
 		print('"get":')
+		attribute_list = list(_Response._fields) + list(RespGet._fields)
 		for x in range(3):
 			response = myClient.dp_get(path="System:Time")
 			print('response to our request: ' + repr(response))
+			# test of magic method "__getattr__()" implemented in class _Mydict()
+			# =>user simply can write "response[0].code" or the ususal "response[0].['code']"
+			for name in attribute_list:
+				print('\tresponse[0].' + name + ' =\t' + repr(getattr(response[0], name)))
 			print('*' * 20)
 
 	if 2 in test_set:
