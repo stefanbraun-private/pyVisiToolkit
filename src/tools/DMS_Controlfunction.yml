@@ -5,7 +5,8 @@
 #
 # help for YAML: https://learnxinyminutes.com/docs/yaml/
 #                https://symfony.com/doc/current/components/yaml/yaml_format.html
-# =>indention is always done with two spaces, no tabs!
+# =>indention is always done with two spaces, no tabs are allowed!!!
+#   http://www.yaml.org/faq.html
 #
 # =>about inheritation: referencing to an anchor means copying this node or attribut to the second position
 #   behaviour of second position:
@@ -13,7 +14,9 @@
 #     -when replacing an attribute then whole node tree gets replaced with this new data... no overwriting with some changed values possible... :-/
 #
 # USAGE:
-#  name of function: any valid python identifier
+#  function name:   string used as identifier. can contain spaces
+#  activated:       simple enabling/disabling of functions.
+#  key_prefix:      prefix used in all DMS-keys in same function. it's simply a string concatenation, you have to care yourself for ":" in the DMS-keys
 #  vars: minimum one is required, name must be any valid python identifier, DMS-datapoint must exist
 #  expr: any valid Python expression, but beware: it must evaluate to ONE value with datatype of "result"-datapoint, otherwise DMS doesn't accept value... ;-)
 #        =>remark:  short circuit evaluation of logical expressions:        https://docs.python.org/2.7/reference/expressions.html#boolean-operations
@@ -29,17 +32,18 @@
 #
 #
 # EXAMPLES:
-#
-# addition of two DMS datapoints
 ####################################
-# functions:
-#   addition_1:
-#     activated: true
-#     vars:
-#       a: "System:Time:Minutes"
-#       b: "System:Time:Seconds"
-#     expr: "a + b"
-#     result: "MSR01:Test"
+#functions:
+#  addition_1:
+#  # addition of two DMS datapoints
+#    activated: true
+#    key_prefix: ""
+#    vars:
+#      a: "System:Time:Minutes"
+#      b: "System:Time:Seconds"
+#    expr: "a + b"
+#    result: "MSR01:Test"
+####################################
 
 
 
@@ -47,8 +51,19 @@ functions:
   test_1:
   # used during development
     activated: true
+    key_prefix: ""
     vars:
       a: "System:Time:Minutes"
       b: "System:Time:Seconds"
     expr: "a + b"
     result: "MSR01:Test"
+
+  test_2:
+  # used during development
+    activated: true
+    key_prefix: ""
+    vars:
+      a: "System:Time:Minutes"
+      b: "System:Time:Seconds"
+    expr: "a - b"
+    result: "MSR01:Test2"

@@ -60,7 +60,8 @@ import axel
 logger = logging.getLogger('dms.dmswebsocket')
 logger.setLevel(logging.DEBUG)
 
-# create console handler and set level to debug
+# create console handler
+# =>set level to DEBUG if you want to see everything on console!
 ch = logging.StreamHandler()
 ch.setLevel(logging.INFO)
 
@@ -1131,7 +1132,7 @@ class RespSub(_Mydict, _Response):
 					try:
 						self._values_dict[field] = Query(**query_dict)
 					except ValueError as ex:
-						logger.warn('RespSub(): consctructor of Query() found unknown fields in current response, perhaps unsupported JSON Data Exchange protocol!')
+						logger.warn('RespSub(): constructor of Query() found unknown fields in current response, perhaps unsupported JSON Data Exchange protocol!')
 						raise ex
 				else:
 					# default: no special treatment
@@ -1261,7 +1262,7 @@ class RespChangelogRead(_Mydict, _Response):
 
 
 
-class Subscription(axel.Event):
+class SubscriptionAE(axel.Event):
 	''' mapping python callbacks to DMS events '''
 	# extending "axel events" for events handling https://github.com/axel-events/axel
 	# =>caller has to attach his callback functions to this object.
@@ -1269,10 +1270,19 @@ class Subscription(axel.Event):
 
 	def __init__(self, msghandler, sub_response):
 		self._msghandler = msghandler
-		self.sub_response = sub_response
+		self.sub_response = sub_response    # original DMS response (instance of RespSub())
+
 		# details about constructor of Event():
 		# https://github.com/axel-events/axel/blob/master/axel/axel.py
-		super(Subscription, self).__init__(threads=1)
+		# (setting threads>0 means synchronous execution of eventhandler,
+		#  this way we get success or failure data in _MessageHandler.handle()
+		#  ==> FIXME: when user's synchronous executed callback calls DMSClient._send_message(), then we get a deadlock!!!)
+		# details about traceback:
+		#  https://pythonhosted.org/axel/
+		#  https://docs.python.org/2/library/sys.html
+		super(SubscriptionAE, self).__init__(threads=1,
+		                                     exc_info=True,
+		                                     traceback=False)
 
 	def get_tag(self):
 		return self.sub_response[u'tag']
@@ -1306,6 +1316,11 @@ class Subscription(axel.Event):
 			self.unsubscribe()
 		except TypeError:
 			pass
+
+	def __repr__(self):
+		""" developer representation of this object """
+		return u'SubscriptionAE(self.sub_response=' + repr(self.sub_response) + u')'
+
 
 
 class DMSEvent(_Mydict):
@@ -1380,11 +1395,11 @@ class _MessageHandler(object):
 		self._pending_response_lock = threading.Lock()
 
 
-		# dict for DMS-events (key: tag, value: Subscription-objects)
+		# dict for DMS-events (key: tag, value: SubscriptionAE-objects)
 		# =>DMS-event will fire our python event
 		# (our chosen tag for DMS subscription command is unique across all events related to this subscription)
-		self._subscriptions_dict = {}
-		self._subscriptions_lock = threading.Lock()
+		self._subscriptionAE_objs_dict = {}
+		self._subscriptionAE_objs_lock = threading.Lock()
 
 
 		# object for assembling response lists
@@ -1610,23 +1625,31 @@ class _MessageHandler(object):
 				# trigger Python event
 				try:
 					event_obj = DMSEvent(**event)
-					tag = event_obj[u'tag']
-					with self._subscriptions_lock:
-						sub = self._subscriptions_dict[tag]
+					with self._subscriptionAE_objs_lock:
+						subAE = self._subscriptionAE_objs_dict[event_obj.tag]
 					# print('DEBUGGING: _MsgHandler.handle(), sub=' + repr(sub) + ', sub.event=' + repr(sub.event))
 
 					# firing Python callback functions registered in axel.Event()
 					# (result is tuple of tuples: https://github.com/axel-events/axel/blob/master/axel/axel.py#L122 )
-					if len(sub) > 0:
-						result = sub(event_obj)
-
+					if len(subAE) > 0:
+						logger.debug('_MsgHandler.handle(): event-firing on SubscriptionAE object [DMS-key="' + event_obj.path + '" / tag=' + event_obj.tag + ']')
+						result = subAE(event_obj)
 						# FIXME: how to inform caller about exceptions while executing his callbacks?
-						# FIXME: should we use Python logger framework?
-						logger.debug('_MsgHandler.handle(): result of event-firing on axel.Event object:')
 						for idx, res in enumerate(result):
-							logger.debug('=>result of callback number ' + str(idx) + ': ' + repr(res))
+							if res[0] == None:
+								logger.debug('_MsgHandler.handle(): event-firing on SubscriptionAE object: asynchronously started callback' + str(idx) + ': handler=' + repr(res[2]))
+							else:
+								logger.debug('_MsgHandler.handle(): event-firing on SubscriptionAE object: synchronous callback' + str(idx) + ': success=' + str(res[0]) + ', result=' + str(res[1]) + ', handler=' + repr(res[2]))
+
+							# since we process axel.Events synchronously (this could be a bottleneck!!!) we get success or failure data
+							# =>look in constructor of SubscriptionAE() for details
+							if res[0] == False:
+								# example: res[1] without traceback: (<type 'exceptions.TypeError'>, TypeError("cannot concatenate 'str' and 'int' objects",))
+								#          =>when traceback=True, then ID of traceback object is added to the part above.
+								#            Assumption: traceback is not needed. It would be useful when debugging client code...
+								logger.error('_MsgHandler.handle(): event-firing on SubscriptionAE object: synchronous callback' + str(idx) + ' failed: ' + str(res[1]) + ' [handler=' + repr(res[2]) + ']')
 					else:
-						logger.info('_MsgHandler.handle(): axel.Event object is empty, suppressing event-firing...')
+						logger.info('_MsgHandler.handle(): SubscriptionsAE object is empty, suppressing firing of axel.Event...')
 				except AttributeError:
 					logger.exception("exception in _MessageHandler.handle(): DMS-event seems corrupted")
 				except KeyError:
@@ -1659,15 +1682,13 @@ class _MessageHandler(object):
 			# no response in given timeframe... Should we return an exception?
 			raise Exception('_MessageHandler.DMS_busy_wait_for_response(): got no response within ' + str(timeout) + ' seconds...')
 
-	def add_subscription(self, sub):
-		tag = sub.get_tag()
-		with self._subscriptions_lock:
-			self._subscriptions_dict[tag] = sub
+	def add_subscription(self, subAE):
+		with self._subscriptionAE_objs_lock:
+			self._subscriptionAE_objs_dict[subAE.get_tag()] = subAE
 
-	def del_subscription(self, sub):
-		tag = sub.get_tag()
-		with self._subscriptions_lock:
-			del(self._subscriptions_dict[tag])
+	def del_subscription(self, subAE):
+		with self._subscriptionAE_objs_lock:
+			del(self._subscriptionAE_objs_dict[subAE.get_tag()])
 
 
 	def prepare_tag(self, curr_tag=None):
@@ -1735,9 +1756,9 @@ class DMSClient(object):
 			print('DEBUGGING: get_dp_subscription(): type(response)=' + repr(type(response)) + ', repr(response)=' + repr(response))
 		if response["code"] == u'ok':
 			# DMS accepted subscription
-			sub = Subscription(msghandler=self._msghandler, sub_response=response)
-			self._msghandler.add_subscription(sub)
-			return sub
+			subAE = SubscriptionAE(msghandler=self._msghandler, sub_response=response)
+			self._msghandler.add_subscription(subAE=subAE)
+			return subAE
 		else:
 			raise Exception(u'DMS ignored subscription of "' + path + '" with error "' + response.code + '"!')
 
@@ -1804,7 +1825,7 @@ if __name__ == '__main__':
 
 
 	#test_set = set(['ws'] + range(18))
-	test_set = set(['ws', 1])
+	test_set = set(['ws', 11])
 
 	if 'ws' in test_set:
 		myClient = DMSClient(u'test', u'user')
@@ -1927,8 +1948,13 @@ if __name__ == '__main__':
 		print('got Subscription object: ' + repr(sub))
 		print('adding callback function:')
 		def myfunc(event):
-			print('\t\tGOT EVENT: ' + repr(event))
+			print('\t\tmyfunc(): GOT EVENT: ' + repr(event))
 		sub += myfunc
+
+		def myfunc2(event):
+			# testing logging of exception in callback function: TypeError("cannot concatenate 'str' and 'int' objects",)
+			print('\t\tmyfunc2(): GOT EVENT: ' + repr(event) + 1)
+		sub += myfunc2
 
 		print('waiting some seconds while callback should getting fired in background...')
 		for x in range(30):
@@ -1941,6 +1967,7 @@ if __name__ == '__main__':
 
 		print('waiting some seconds with active DMS subscription but without Python callbackfunction...')
 		sub -= myfunc
+		sub -= myfunc2
 		for x in range(30):
 			time.sleep(0.1)
 
