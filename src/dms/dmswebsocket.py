@@ -48,6 +48,7 @@ import threading
 import collections
 import dateutil.parser, datetime
 import logging
+import queue
 
 # events handling https://github.com/axel-events/axel
 # =>installed with pip from https://anaconda.org/pypi/axel
@@ -1276,7 +1277,6 @@ class SubscriptionAE(axel.Event):
 		# https://github.com/axel-events/axel/blob/master/axel/axel.py
 		# (setting threads>0 means synchronous execution of eventhandler,
 		#  this way we get success or failure data in _MessageHandler.handle()
-		#  ==> FIXME: when user's synchronous executed callback calls DMSClient._send_message(), then we get a deadlock!!!)
 		# details about traceback:
 		#  https://pythonhosted.org/axel/
 		#  https://docs.python.org/2/library/sys.html
@@ -1378,11 +1378,14 @@ class DMSEvent(_Mydict):
 
 
 class _MessageHandler(object):
-	def __init__(self, dmsclient_obj, whois_str, user_str):
+	def __init__(self, dmsclient_obj, whois_str, user_str, subAE_queue):
 		# backreference for sending messages
 		self._dmsclient = dmsclient_obj
 		self._whois_str = whois_str
 		self._user_str = user_str
+
+		# Queue for firing Subscription-axel.Events
+		self._subAE_queue = subAE_queue
 
 		# thread safety for shared dictionaries =>we want to be on the safe side!
 		# (documentation: https://docs.python.org/2/library/threading.html#lock-objects )
@@ -1627,27 +1630,12 @@ class _MessageHandler(object):
 					event_obj = DMSEvent(**event)
 					with self._subscriptionAE_objs_lock:
 						subAE = self._subscriptionAE_objs_dict[event_obj.tag]
-					# print('DEBUGGING: _MsgHandler.handle(), sub=' + repr(sub) + ', sub.event=' + repr(sub.event))
 
-					# firing Python callback functions registered in axel.Event()
+					# via background thread: firing Python callback functions registered in axel.Event()
 					# (result is tuple of tuples: https://github.com/axel-events/axel/blob/master/axel/axel.py#L122 )
 					if len(subAE) > 0:
 						logger.debug('_MsgHandler.handle(): event-firing on SubscriptionAE object [DMS-key="' + event_obj.path + '" / tag=' + event_obj.tag + ']')
-						result = subAE(event_obj)
-						# FIXME: how to inform caller about exceptions while executing his callbacks?
-						for idx, res in enumerate(result):
-							if res[0] == None:
-								logger.debug('_MsgHandler.handle(): event-firing on SubscriptionAE object: asynchronously started callback' + str(idx) + ': handler=' + repr(res[2]))
-							else:
-								logger.debug('_MsgHandler.handle(): event-firing on SubscriptionAE object: synchronous callback' + str(idx) + ': success=' + str(res[0]) + ', result=' + str(res[1]) + ', handler=' + repr(res[2]))
-
-							# since we process axel.Events synchronously (this could be a bottleneck!!!) we get success or failure data
-							# =>look in constructor of SubscriptionAE() for details
-							if res[0] == False:
-								# example: res[1] without traceback: (<type 'exceptions.TypeError'>, TypeError("cannot concatenate 'str' and 'int' objects",))
-								#          =>when traceback=True, then ID of traceback object is added to the part above.
-								#            Assumption: traceback is not needed. It would be useful when debugging client code...
-								logger.error('_MsgHandler.handle(): event-firing on SubscriptionAE object: synchronous callback' + str(idx) + ' failed: ' + str(res[1]) + ' [handler=' + repr(res[2]) + ']')
+						self._subAE_queue.put((subAE, event_obj))
 					else:
 						logger.info('_MsgHandler.handle(): SubscriptionsAE object is empty, suppressing firing of axel.Event...')
 				except AttributeError:
@@ -1705,11 +1693,59 @@ class _MessageHandler(object):
 		return curr_tag
 
 
+
+class _SubscriptionAE_Dispatcher(threading.Thread):
+	""" firing Subscription-Axel.Events in a separated thread """
+	# =>if user adds an infinitly running function, then only the event-monitoring is blocked,
+	#   instead of blocking whole _MessageHandler.handle() function
+	# =>this way a users callback function should be able to send WebSocket messages
+	#   (ealier we had a deadlock sending a message while processing _cb_on_message() function)
+	# FIXME: we should implement a hard timeout when synchronous execution of a fired SubscriptionAE() uses too much time
+	# FIXME: we use a "polling queue", it's a waste of CPU time when no datapoint subscription is active...
+
+	def __init__(self, event_q):
+		self._event_q = event_q
+		self.keep_running = True
+		super(_SubscriptionAE_Dispatcher, self).__init__()
+
+	def run(self):
+		# "polling queue" based on code from http://stupidpythonideas.blogspot.ch/2013/10/why-your-gui-app-freezes.html
+		logger.debug('_SubscriptionAE_Dispatcher.run(): background thread for firing axel.Events() is running...')
+		while self.keep_running:
+			try:
+				subAE, event_obj = self._event_q.get(block=False)
+			except queue.Empty:
+				# give other threads some CPU time...
+				time.sleep(SLEEP_TIMEBASE)
+			except Exception as ex:
+				logger.error('_SubscriptionAE_Dispatcher.run(): got exception ' + repr(ex))
+			else:
+				# (this is an optional else clause when no exception occured)
+				logger.debug('_SubscriptionAE_Dispatcher.run(): event-firing on SubscriptionAE object [DMS-key="' + event_obj.path + '" / tag=' + event_obj.tag + ']')
+				result = subAE(event_obj)
+				# FIXME: how to inform caller about exceptions while executing his callbacks?
+				for idx, res in enumerate(result):
+					if res[0] == None:
+						logger.debug('_SubscriptionAE_Dispatcher.run(): event-firing on SubscriptionAE object: asynchronously started callback' + str(idx) + ': handler=' + repr(res[2]))
+					else:
+						logger.debug('_SubscriptionAE_Dispatcher.run(): event-firing on SubscriptionAE object: synchronous callback' + str(idx) + ': success=' + str(res[0]) + ', result=' + str(res[1]) + ', handler=' + repr(res[2]))
+
+					# since we process axel.Events synchronously (this could be a bottleneck or risk of blocking!!!) we get success or failure data
+					# =>look in constructor of SubscriptionAE() for details
+					if res[0] == False:
+						# example: res[1] without traceback: (<type 'exceptions.TypeError'>, TypeError("cannot concatenate 'str' and 'int' objects",))
+						#          =>when traceback=True, then ID of traceback object is added to the part above.
+						#            Assumption: traceback is not needed. It would be useful when debugging client code...
+						logger.error('_SubscriptionAE_Dispatcher.run(): event-firing on SubscriptionAE object: synchronous callback' + str(idx) + ' failed: ' + str(res[1]) + ' [handler=' + repr(res[2]) + ']')
+
+
+
 class DMSClient(object):
 	def __init__(self, whois_str, user_str, dms_host_str=DMS_HOST, dms_port_int=DMS_PORT):
 		self._dms_host_str = dms_host_str
 		self._dms_port_int = dms_port_int
-		self._msghandler = _MessageHandler(dmsclient_obj=self, whois_str=whois_str, user_str=user_str)
+		self._subAE_queue = queue.Queue()
+		self._msghandler = _MessageHandler(dmsclient_obj=self, whois_str=whois_str, user_str=user_str, subAE_queue=self._subAE_queue)
 
 		# thread synchronisation flag for Websocket connection state
 		# (documentation: https://docs.python.org/2/library/threading.html#event-objects )
@@ -1730,6 +1766,10 @@ class DMSClient(object):
 		self._ws_thread = thread.start_new_thread(self._ws.run_forever, ())
 		# FIXME: how to return caller a non-reachable WebSocket server?
 		logger.info("WebSocket connection will be established in background...")
+
+		# background thread for firing Subscription-axel.Events
+		self._subAE_disp_thread = _SubscriptionAE_Dispatcher(event_q=self._subAE_queue)
+
 
 	# API
 	def dp_get(self, path, timeout=TIMEOUT, **kwargs):
@@ -1795,10 +1835,12 @@ class DMSClient(object):
 
 	def _cb_on_open(self, ws):
 		logger.info("websocket callback _on_open(): WebSocket connection is established.")
+		self._subAE_disp_thread.start()
 		self.ready_to_send.set()
 
 	def _cb_on_close(self, ws):
-		logger.info("websocket callback _on_close(): server closed connection =>shutting down client thread")
+		logger.info("websocket callback _on_close(): server closed connection =>shutting down own client thread")
+		self._subAE_disp_thread.keep_running = False
 		self.ready_to_send.clear()
 		self._exit_ws_thread()
 
