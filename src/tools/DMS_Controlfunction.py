@@ -74,14 +74,15 @@ class DMSDatapoint(object):
 
 
 class DMSDatapoint_Result(DMSDatapoint):
-
-
 	def __init__(self, dms_ws, key_str):
 		super(DMSDatapoint_Result, self).__init__(dms_ws, key_str)
+		self._cached_val = None
 
 	def write_to_dms(self, newval):
 		# synchronize to DMS
 		if self.is_available():
+			if self._cached_val and self._cached_val != self._value:
+				logger.warn('DMSDatapoint_Result.write_to_dms(): unexpected value change of DMS key "' + self.key_str + '" [cached:' + repr(self._cached_val) + ' | current:'  + repr(self._value) + '] ... others are writing to this key!')
 			if newval != self._value:
 				logger.debug('DMSDatapoint_Result.write_to_dms(): updating DMS key "' + self.key_str + '" with value ' + repr(newval) + ' converted to ' + self._datatype)
 				try:
@@ -95,7 +96,9 @@ class DMSDatapoint_Result(DMSDatapoint):
 				resp = self._dms_ws.dp_set(path=self.key_str,
 				                           value=self._value,
 				                           create=False)
-				if resp[0].message:
+				if resp[0].code == 'ok':
+					self._cached_val = resp[0].value
+				else:
 					logger.error('DMSDatapoint_Result.write_to_dms(): DMS returned error "' + resp[0].message + '" for DMS key "' + self.key_str + '"')
 					raise Exception()
 		else:
