@@ -1827,19 +1827,19 @@ class DMSClient(object):
 
 
 	def _cb_on_message(self, ws, message):
-		logger.debug("websocket callback _on_message(): " + message)
+		logger.debug("DMSClient: websocket callback _on_message(): " + message)
 		self._msghandler.handle(message)
 
 	def _cb_on_error(self, ws, error):
-		logger.error("websocket callback _on_error(): " + error)
+		logger.error("DMSClient: websocket callback _on_error(): " + error)
 
 	def _cb_on_open(self, ws):
-		logger.info("websocket callback _on_open(): WebSocket connection is established.")
+		logger.info("DMSClient: websocket callback _on_open(): WebSocket connection is established.")
 		self._subAE_disp_thread.start()
 		self.ready_to_send.set()
 
 	def _cb_on_close(self, ws):
-		logger.info("websocket callback _on_close(): server closed connection =>shutting down own client thread")
+		logger.info("DMSClient: websocket callback _on_close(): server closed connection =>shutting down own client thread")
 		self._subAE_disp_thread.keep_running = False
 		self.ready_to_send.clear()
 		self._exit_ws_thread()
@@ -1852,14 +1852,27 @@ class DMSClient(object):
 
 	def _exit_ws_thread(self):
 		# FIXME: this function is never called from callbacks... But why?
-		logger.debug("exiting websocket thread...")
-		for curr_thread in threading.enumerate():
-			if curr_thread.ident == self._ws_thread:
-				if curr_thread.is_alive():
-					curr_thread.exit()
-				else:
-					logger.debug("websocket thread was already dead.")
-				break
+		logger.debug("DMSClient._exit_ws_thread(): exiting websocket thread...")
+		self._ws.keep_running = False
+
+	def _exit_subAE_thread(self):
+		logger.debug("DMSClient._exit_subAE_thread(): exiting subscriptionAE-dispatcher thread...")
+		self._subAE_disp_thread.keep_running = False
+
+	# trying to implement Context Manager.
+	# help from https://jeffknupp.com/blog/2016/03/07/python-with-context-managers/
+	#           https://gist.github.com/bradmontgomery/4f4934893388f971c6c5
+	#           https://docs.python.org/2/reference/datamodel.html#object.__exit__
+	def __enter__(self):
+		return self
+
+	def __exit__(self, exc_type, exc_value, traceback):
+		self._exit_ws_thread()
+		self._exit_subAE_thread()
+		if traceback:
+			logger.error("DMSClient.__exit__(): type: {}".format(exc_type))
+			logger.error("DMSClient.__exit__(): value: {}".format(exc_value))
+			logger.error("DMSClient.__exit__(): traceback: {}".format(traceback))
 
 
 
@@ -1867,7 +1880,17 @@ if __name__ == '__main__':
 
 
 	#test_set = set(['ws'] + range(18))
-	test_set = set(['ws', 11])
+	#test_set = set(['ws', 11])
+	test_set = set(['contextmanager'])
+
+	if 'contextmanager' in test_set:
+		with DMSClient(u'test', u'user') as myClient:
+			print('\nTesting creation of Request command:')
+			print('"get":')
+			response = myClient.dp_get(path="System:Time")
+			print('response to our request: ' + repr(response))
+			print('\tresponse[0].value=' + repr(response[0].value))
+
 
 	if 'ws' in test_set:
 		myClient = DMSClient(u'test', u'user')

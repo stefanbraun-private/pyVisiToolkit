@@ -17,8 +17,8 @@
 #  function name:   string used as identifier. can contain spaces
 #  activated:       simple enabling/disabling of functions.
 #  key_prefix:      prefix used in all DMS-keys in same function. it's simply a string concatenation, you have to care yourself for ":" in the DMS-keys
-#  vars: minimum one is required, name must be any valid python identifier, DMS-datapoint must exist
-#  expr: any valid Python expression, but beware: it must evaluate to ONE value with datatype of "result"-datapoint, otherwise DMS doesn't accept value... ;-)
+#  vars:            minimum one is required, name must be any valid python identifier, DMS-datapoint must exist
+#  expr:            any valid Python expression, but beware: it must evaluate to ONE value with datatype of "result"-datapoint, otherwise DMS doesn't accept value... ;-)
 #        =>remark:  short circuit evaluation of logical expressions:        https://docs.python.org/2.7/reference/expressions.html#boolean-operations
 #                   bitwise evaluation of logical expressions:              https://docs.python.org/2.7/reference/expressions.html#binary-bitwise-operations
 #        =>remark2: conditional-expressions are written as "a if x else b"  https://docs.python.org/2.7/reference/expressions.html#conditional-expressions
@@ -28,7 +28,7 @@
 #        =>remark6: the modules "math" and "random" are available (e.g. for random.choice([True, False]), or for constant math.pi)
 #                   https://docs.python.org/2/library/math.html
 #                   https://docs.python.org/2/library/random.html
-#  result: DMS-datapoint must exist
+#  result: DMS-datapoint must exist with correct datatype
 #
 #
 # EXAMPLES:

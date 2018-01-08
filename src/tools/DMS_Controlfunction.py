@@ -33,7 +33,7 @@ import random
 # (based on tutorial https://docs.python.org/2/howto/logging.html )
 # create logger
 logger = logging.getLogger('tools.DMS_Controlfunction')
-logger.setLevel(logging.DEBUG)
+logger.setLevel(logging.INFO)
 
 # create console handler
 # =>set level to DEBUG if you want to see everything on console!
@@ -305,28 +305,28 @@ class Runner(object):
 
 
 def main(dms_server, dms_port, only_check, only_dryrun, configfile):
-	dms_ws = dms.dmswebsocket.DMSClient(whois_str=u'pyVisiToolkit',
+	with dms.dmswebsocket.DMSClient(whois_str=u'pyVisiToolkit',
 	                                    user_str=u'tools.DMS_Controlfunction',
 	                                    dms_host_str=dms_server,
-	                                    dms_port_int=dms_port)
-	logger.info('established WebSocket connection to DMS version ' + dms_ws.dp_get(path='System:Version:dms.exe')[0]['value'])
-	runner = Runner(dms_ws=dms_ws,
-	                configfile=configfile,
-	                only_dryrun=only_dryrun)
-	runner.load_config()
-	runner.check_datapoints()
-	if not only_check:
-		runner.subscribe_datapoints()
+	                                    dms_port_int=dms_port) as dms_ws:
+		logger.info('established WebSocket connection to DMS version ' + dms_ws.dp_get(path='System:Version:dms.exe')[0]['value'])
+		runner = Runner(dms_ws=dms_ws,
+		                configfile=configfile,
+		                only_dryrun=only_dryrun)
+		runner.load_config()
+		runner.check_datapoints()
+		if not only_check:
+			runner.subscribe_datapoints()
 
-		# help from http://stackoverflow.com/questions/13180941/how-to-kill-a-while-loop-with-a-keystroke
-		try:
-			logger.info('"DMS_Controlfunction" is working now... Press <CTRL> + C for aborting.')
-			while True:
-				# FIXME: we should implement a more efficient method...
-				runner.evaluate_functions()
-				time.sleep(0.001)
-		except KeyboardInterrupt:
-			pass
+			# help from http://stackoverflow.com/questions/13180941/how-to-kill-a-while-loop-with-a-keystroke
+			try:
+				logger.info('"DMS_Controlfunction" is working now... Press <CTRL> + C for aborting.')
+				while True:
+					# FIXME: we should implement a more efficient method...
+					runner.evaluate_functions()
+					time.sleep(0.001)
+			except KeyboardInterrupt:
+				pass
 	logger.info('Quitting "DMS_Controlfunction"...')
 
 	return 0        # success
