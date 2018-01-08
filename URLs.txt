@@ -2,8 +2,33 @@
 
 official development documentation
 ----------------------------------
+inofficial mirror: https://github.com/stefanbraun-private/stefanbraun-private.github.io/tree/master/ProMoS_dev_docs
+
+
+
+=>access to DMS/PDBS via JSON Data Exchange (over HTTP or WebSocket)
+"ProMoS_DMS_JSON_Data_Exchange_en_V1.4.pdf"
+Version 1.4 / 23.05.2016
+(c) 2016 MST Systemtechnik AG, Belp
+
+
+************************************************************
+
 
 =>access to DMS/PDBS via internal DLLs
+
+"ProMoS Development - englisch.pdf"
+(c) 2008 MST Systemtechnik AG
+
+
+"ProMoS Development.pdf"
+(c) 2008 MST Systemtechnik AG
+
+
+
+
+***************
+currently offline:
 
 "ProMoS Development2.pdf"
 (c) 2008 MST Systemtechnik AG
