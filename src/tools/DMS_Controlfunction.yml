@@ -50,7 +50,7 @@
 functions:
   test_1:
   # used during development
-    activated: true
+    activated: false
     key_prefix: ""
     vars:
       a: "System:Time:Minutes"
@@ -65,5 +65,7 @@ functions:
     vars:
       a: "System:Time:Minutes"
       b: "System:Time:Seconds"
-    expr: "a - b"
+      c: "System:Version:_SetupVersion"
+      d: "System:ALM:Enable"
+    expr: "max(a, b) if (not '1.7' in c and d) else random.choice([-1, 0, 1]) + b"
     result: "MSR01:Test2"

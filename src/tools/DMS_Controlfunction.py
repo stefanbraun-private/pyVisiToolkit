@@ -236,8 +236,9 @@ class Controlfunction(object):
 					self._result_var.write_to_dms(result_value)
 				except Exception as ex:
 					logger.error('Controlfunction.evaluate(): [name: ' + self._name + '] could not store result in DMS!')
-				finally:
-					self.result_dirty.clear()
+
+			# now we say we're done.
+			self.result_dirty.clear()
 
 
 
