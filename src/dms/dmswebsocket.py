@@ -51,7 +51,9 @@ import logging
 import queue
 
 # events handling https://github.com/axel-events/axel
-# =>installed with pip from https://anaconda.org/pypi/axel
+# (=>installed with pip from https://anaconda.org/pypi/axel )
+# january 9th 2018: it seems that this old version 0.0.3 leaks threads... =>trying axel.Event from Github
+# FIXME: how to install it clean on Anaconda / PyCharm? Workaround: including it into pyVisiToolkit directory...
 import axel
 
 
@@ -59,7 +61,7 @@ import axel
 # (based on tutorial https://docs.python.org/2/howto/logging.html )
 # create logger
 logger = logging.getLogger('dms.dmswebsocket')
-logger.setLevel(logging.DEBUG)
+logger.setLevel(logging.INFO)
 
 # create console handler
 # =>set level to DEBUG if you want to see everything on console!

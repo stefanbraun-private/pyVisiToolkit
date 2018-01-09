@@ -50,7 +50,7 @@
 functions:
   test_1:
   # used during development
-    activated: false
+    activated: true
     key_prefix: ""
     vars:
       a: "System:Time:Minutes"

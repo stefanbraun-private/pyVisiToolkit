@@ -143,6 +143,7 @@ class DMSDatapoint_Var(DMSDatapoint):
 		#  executing _MessageHandler._send_message() in _MessageHandler.handle() while firing SubscriptionAE() is not possible...)
 		for func_obj in self._curr_func_list:
 			func_obj.result_dirty.set()
+		logger.debug('DMSDatapoint_Var._cb_set_value(): callback for DMS key "' + self.key_str + '" is done.')
 
 
 	def subscribe(self):
@@ -237,8 +238,8 @@ class Controlfunction(object):
 				except Exception as ex:
 					logger.error('Controlfunction.evaluate(): [name: ' + self._name + '] could not store result in DMS!')
 
-			# now we say we're done.
-			self.result_dirty.clear()
+		# now we say we're done.
+		self.result_dirty.clear()
 
 
 
@@ -302,6 +303,10 @@ class Runner(object):
 			if func_obj.result_dirty.is_set():
 				logger.debug('Runner.evaluate_functions(): function "' + func_name + '" needs refreshing of result')
 				func_obj.evaluate()
+
+				for t_info in threading.enumerate():
+					logger.debug('Runner.evaluate_functions(): active thread: ' + repr(t_info))
+
 
 
 
