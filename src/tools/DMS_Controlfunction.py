@@ -17,7 +17,7 @@ You should have received a copy of the GNU General Public License along with thi
 """
 
 
-import dms.dmswebsocket
+import dms.dmswebsocket as dms
 import argparse
 import logging
 import yaml
@@ -31,7 +31,7 @@ import random
 
 # setup of logging
 # (based on tutorial https://docs.python.org/2/howto/logging.html )
-# create logger
+# create logger =>set level to DEBUG if you want to catch all log messages!
 logger = logging.getLogger('tools.DMS_Controlfunction')
 logger.setLevel(logging.INFO)
 
@@ -125,6 +125,8 @@ class DMSDatapoint_Var(DMSDatapoint):
 			self._curr_func_list = []
 		self._sub_obj = None
 		super(DMSDatapoint_Var, self).__init__(dms_ws, key_str)
+		# monitoring of a datapoint allows us to cache it's state
+		self._is_available_cached = False
 
 	def add_function(self, curr_func):
 		# backreference to function where this variable is used
@@ -132,9 +134,19 @@ class DMSDatapoint_Var(DMSDatapoint):
 
 
 	# callback function for DMS event
-	def _cb_set_value(self, event):
-		logger.debug('DMSDatapoint_Var._cb_set_value(): callback for DMS key "' + self.key_str + '" was fired...')
+	def _cb_changed_value(self, event):
+		logger.debug('DMSDatapoint_Var._cb_changed_value(): callback for DMS key "' + self.key_str + '" was fired...')
 		self._value = event.value
+		self._datatype = event.type
+
+		# interpretation of current datapoint state
+		if event.code in (dms.DMSEvent.CODE_SET, dms.DMSEvent.CODE_CREATE):
+			self._is_available_cached = True
+		elif event.code is dms.DMSEvent.CODE_DELETE:
+			self._is_available_cached = False
+		else:
+			logger.error('internal error: DMSDatapoint_Var._cb_changed_value(): callback for DMS key "' + self.key_str + '" contains unexpected code "' + repr(event.code) + ', check subscribe().')
+
 
 		# inform all Controlfunctions of changed value
 		# =>main thread will check this
@@ -150,17 +162,22 @@ class DMSDatapoint_Var(DMSDatapoint):
 		if not self._sub_obj:
 			logger.debug('DMSDatapoint_Var.subscribe(): trying to subscribe DMS key "' + self.key_str + '"...')
 			self._sub_obj = self._dms_ws.get_dp_subscription(path=self.key_str,
-			                                                 event=dms.dmswebsocket.ON_CHANGE)
+			                                                 event=dms.ON_SET + dms.ON_CREATE + dms.ON_DELETE)
 			logger.debug('DMSDatapoint_Var.subscribe(): trying to add callback for DMS key "' + self.key_str + '"...')
 			msg = self._sub_obj.sub_response.message
 			if not msg:
-				self._sub_obj += self._cb_set_value
+				self._sub_obj += self._cb_changed_value
 				logger.info('DMSDatapoint_Var.subscribe(): monitoring of DMS key "' + self.key_str + '" is ready.')
 			else:
 				logger.error('DMSDatapoint_Var.subscribe(): monitoring of DMS key "' + self.key_str + '" failed! [message: ' + msg + '])')
 				raise Exception('subscription failed!')
 		else:
 			logger.debug('DMSDatapoint_Var.subscribe(): DMS key "' + self.key_str + '" is already subscribed...')
+
+
+	def is_available(self):
+		# override of function in superclass: using cached datapoint state if possible
+		return self._is_available_cached or super(DMSDatapoint_Var, self).is_available()
 
 
 class Controlfunction(object):
@@ -311,7 +328,7 @@ class Runner(object):
 
 
 def main(dms_server, dms_port, only_check, only_dryrun, configfile):
-	with dms.dmswebsocket.DMSClient(whois_str=u'pyVisiToolkit',
+	with dms.DMSClient(whois_str=u'pyVisiToolkit',
 	                                    user_str=u'tools.DMS_Controlfunction',
 	                                    dms_host_str=dms_server,
 	                                    dms_port_int=dms_port) as dms_ws:
