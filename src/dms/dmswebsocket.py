@@ -59,7 +59,7 @@ import axel
 
 # setup of logging
 # (based on tutorial https://docs.python.org/2/howto/logging.html )
-# create logger
+# create logger =>set level to DEBUG if you want to catch all log messages!
 logger = logging.getLogger('dms.dmswebsocket')
 logger.setLevel(logging.INFO)
 
@@ -93,7 +93,21 @@ DMS_HOST = "127.0.0.1"      # local connection: doesn't need authentification
 DMS_BASEPATH = "/json_data" # default for HTTP and WebSocket
 
 # default timeout in seconds for DMS JSON Data Exchange requests
-TIMEOUT = 300
+REQ_TIMEOUT = 300
+
+# Python callbacks fired by monitored DMS datapoints (DMS-Events),
+# via thread _SubscriptionAE_Dispatcher
+# =>axel.Event: every handler of an event with duration longer than this time will get terminated (in log: RuntimeException)
+# =>this is the maximum time a long callback function can block our event queue.
+# maximum (and default) timeout in seconds
+CALLBACK_MAX_TIMEOUT = 30
+# log a warning if callback execution duration is long
+# (in seconds)
+CALLBACK_DURATION_WARNLEVEL = int(CALLBACK_MAX_TIMEOUT * 0.9)
+# log a warning if too many unprocessed events are waiting
+# (number of queue elements)
+EVENTQUEUE_WARNSIZE = 100
+
 
 
 # constants for retrieving extended infos ("extInfos")
@@ -1277,12 +1291,14 @@ class SubscriptionAE(axel.Event):
 
 		# details about constructor of Event():
 		# https://github.com/axel-events/axel/blob/master/axel/axel.py
-		# (setting threads>0 means synchronous execution of eventhandler,
-		#  this way we get success or failure data in _MessageHandler.handle()
+		# (setting threads>=0 means synchronous execution of eventhandler,
+		#  this way we get success or failure data in thread _SubscriptionAE_Dispatcher
 		# details about traceback:
 		#  https://pythonhosted.org/axel/
 		#  https://docs.python.org/2/library/sys.html
-		super(SubscriptionAE, self).__init__(threads=1,
+		# ==>currently we execute all callbacks synchronously in thread _SubscriptionAE_Dispatcher,
+		#    one event-firing is done when all of it's handlers are done.
+		super(SubscriptionAE, self).__init__(threads=5,
 		                                     exc_info=True,
 		                                     traceback=False)
 
@@ -1309,6 +1325,48 @@ class SubscriptionAE(axel.Event):
 		resp = self._msghandler._dp_unsub(path=self.sub_response[u'path'],
 		                                  tag=self.sub_response[u'tag'])
 		self._msghandler.del_subscription(self)
+
+
+	def _extract(self, item):
+		# overriding method in superclass:
+		# -forcing timeout on all our callbacks
+		# -disabling memoize permanently (callback functions of library user must be called on every event!)
+		""" Extracts a handler and handler's arguments that can be provided
+		as list or dictionary. If arguments are provided as list, they are
+		considered to have this sequence: (handler, memoize, timeout)
+		Examples:
+			event += handler
+			event += (handler, True, 1.5)
+			event += {'handler':handler, 'memoize':True, 'timeout':1.5}
+		"""
+		if not item:
+			raise ValueError('Invalid arguments')
+
+		handler = None
+		memoize = False
+		timeout = 0
+
+		if not isinstance(item, (list, tuple, dict)):
+			handler = item
+		elif isinstance(item, (list, tuple)):
+			if len(item) == 3:
+				handler, memoize, timeout = item
+			elif len(item) == 2:
+				handler, memoize = item
+			elif len(item) == 1:
+				handler = item
+		elif isinstance(item, dict):
+			handler = item.get('handler')
+			memoize = item.get('memoize', False)
+			timeout = item.get('timeout', 0)
+
+		# included as protection against infinite blocking in _SubscriptionAE_Dispatcher()
+		# =>set a timeout in every case
+		forced_timeout = max(0, min(float(timeout), CALLBACK_MAX_TIMEOUT))
+
+		# old original code:
+		#return handler, bool(memoize), float(timeout)
+		return handler, False, forced_timeout
 
 
 	def __del__(self):
@@ -1424,7 +1482,7 @@ class _MessageHandler(object):
 			self.response_list = []
 
 
-	def dp_get(self, path, timeout=TIMEOUT, **kwargs):
+	def dp_get(self, path, timeout=REQ_TIMEOUT, **kwargs):
 		""" read datapoint value(s) """
 
 		req = _Request(whois=self._whois_str, user=self._user_str).addCmd(_CmdGet(msghandler=self, path=path, **kwargs))
@@ -1439,7 +1497,7 @@ class _MessageHandler(object):
 			raise Exception('Please report this bug of pyVisiToolkit!')
 
 
-	def dp_set(self, path, value, timeout=TIMEOUT, **kwargs):
+	def dp_set(self, path, value, timeout=REQ_TIMEOUT, **kwargs):
 		""" write datapoint value(s) """
 		# Remarks: datatype in DMS is taken from datatype of "value" (field "type" is optional)
 		# Remarks: datatype STR: 80 chars could be serialized by DMS into Promos.dms file for permament storage.
@@ -1459,7 +1517,7 @@ class _MessageHandler(object):
 			raise Exception('Please report this bug of pyVisiToolkit!')
 
 
-	def dp_del(self, path, recursive, timeout=TIMEOUT, **kwargs):
+	def dp_del(self, path, recursive, timeout=REQ_TIMEOUT, **kwargs):
 		""" delete datapoint(s) """
 
 		req = _Request(whois=self._whois_str, user=self._user_str).addCmd(
@@ -1475,7 +1533,7 @@ class _MessageHandler(object):
 			raise Exception('Please report this bug of pyVisiToolkit!')
 
 
-	def dp_ren(self, path, newPath, timeout=TIMEOUT, **kwargs):
+	def dp_ren(self, path, newPath, timeout=REQ_TIMEOUT, **kwargs):
 		""" rename datapoint(s) """
 
 		req = _Request(whois=self._whois_str, user=self._user_str).addCmd(
@@ -1491,7 +1549,7 @@ class _MessageHandler(object):
 			raise Exception('Please report this bug of pyVisiToolkit!')
 
 
-	def dp_sub(self, path, timeout=TIMEOUT, **kwargs):
+	def dp_sub(self, path, timeout=REQ_TIMEOUT, **kwargs):
 		""" subscribe monitoring of datapoints(s) """
 
 		req = _Request(whois=self._whois_str, user=self._user_str).addCmd(
@@ -1508,7 +1566,7 @@ class _MessageHandler(object):
 
 
 
-	def _dp_unsub(self, path, tag, timeout=TIMEOUT, **kwargs):
+	def _dp_unsub(self, path, tag, timeout=REQ_TIMEOUT, **kwargs):
 		""" unsubscribe monitoring of datapoint(s) """
 		# =>called by Subscription.unsubscribe()
 		req = _Request(whois=self._whois_str, user=self._user_str).addCmd(
@@ -1523,7 +1581,7 @@ class _MessageHandler(object):
 			raise Exception('Please report this bug of pyVisiToolkit!')
 
 
-	def changelog_GetGroups(self, timeout=TIMEOUT, **kwargs):
+	def changelog_GetGroups(self, timeout=REQ_TIMEOUT, **kwargs):
 		""" get list of available changelog groups """
 
 		req = _Request(whois=self._whois_str, user=self._user_str).addCmd(
@@ -1539,7 +1597,7 @@ class _MessageHandler(object):
 			raise Exception('Please report this bug of pyVisiToolkit!')
 
 
-	def changelog_Read(self, group, start, timeout=TIMEOUT, **kwargs):
+	def changelog_Read(self, group, start, timeout=REQ_TIMEOUT, **kwargs):
 		""" get protocol entries in given changelog group """
 
 		req = _Request(whois=self._whois_str, user=self._user_str).addCmd(
@@ -1636,7 +1694,7 @@ class _MessageHandler(object):
 					# via background thread: firing Python callback functions registered in axel.Event()
 					# (result is tuple of tuples: https://github.com/axel-events/axel/blob/master/axel/axel.py#L122 )
 					if len(subAE) > 0:
-						logger.debug('_MsgHandler.handle(): event-firing on SubscriptionAE object [DMS-key="' + event_obj.path + '" / tag=' + event_obj.tag + ']')
+						logger.debug('_MsgHandler.handle(): queueing event-firing on SubscriptionAE object [DMS-key="' + event_obj.path + '" / tag=' + event_obj.tag + ']...')
 						self._subAE_queue.put((subAE, event_obj))
 					else:
 						logger.info('_MsgHandler.handle(): SubscriptionsAE object is empty, suppressing firing of axel.Event...')
@@ -1702,13 +1760,21 @@ class _SubscriptionAE_Dispatcher(threading.Thread):
 	#   instead of blocking whole _MessageHandler.handle() function
 	# =>this way a users callback function should be able to send WebSocket messages
 	#   (ealier we had a deadlock sending a message while processing _cb_on_message() function)
-	# FIXME: we should implement a hard timeout when synchronous execution of a fired SubscriptionAE() uses too much time
+	# FIXME: should we implement a hard timeout when synchronous execution of a fired SubscriptionAE() with masses of handlers uses too much time?
+	# FIXME: should we implement a priority queue for event handling?
+	# FIXME: should we fire SubscriptionAE() in parallel?
 	# FIXME: we use a "polling queue", it's a waste of CPU time when no datapoint subscription is active...
 
 	def __init__(self, event_q):
 		self._event_q = event_q
 		self.keep_running = True
 		super(_SubscriptionAE_Dispatcher, self).__init__()
+
+		# helper variables for diagnostic warnings
+		self._time_secs_old = 0
+		self._time_secs_new = 0
+		self._do_warn_queuesize = True
+
 
 	def run(self):
 		# "polling queue" based on code from http://stupidpythonideas.blogspot.ch/2013/10/why-your-gui-app-freezes.html
@@ -1724,22 +1790,37 @@ class _SubscriptionAE_Dispatcher(threading.Thread):
 			else:
 				# (this is an optional else clause when no exception occured)
 				logger.debug('_SubscriptionAE_Dispatcher.run(): event-firing on SubscriptionAE object [DMS-key="' + event_obj.path + '" / tag=' + event_obj.tag + ']')
+				self._time_secs_old = time.time()
 				result = subAE(event_obj)
-				# FIXME: how to inform caller about exceptions while executing his callbacks?
-				for idx, res in enumerate(result):
-					if res[0] == None:
-						logger.debug('_SubscriptionAE_Dispatcher.run(): event-firing on SubscriptionAE object: asynchronously started callback' + str(idx) + ': handler=' + repr(res[2]))
-					else:
-						logger.debug('_SubscriptionAE_Dispatcher.run(): event-firing on SubscriptionAE object: synchronous callback' + str(idx) + ': success=' + str(res[0]) + ', result=' + str(res[1]) + ', handler=' + repr(res[2]))
+				self._time_secs_new = time.time()
 
-					# since we process axel.Events synchronously (this could be a bottleneck or risk of blocking!!!) we get success or failure data
-					# =>look in constructor of SubscriptionAE() for details
-					if res[0] == False:
-						# example: res[1] without traceback: (<type 'exceptions.TypeError'>, TypeError("cannot concatenate 'str' and 'int' objects",))
-						#          =>when traceback=True, then ID of traceback object is added to the part above.
-						#            Assumption: traceback is not needed. It would be useful when debugging client code...
-						logger.error('_SubscriptionAE_Dispatcher.run(): event-firing on SubscriptionAE object: synchronous callback' + str(idx) + ' failed: ' + str(res[1]) + ' [handler=' + repr(res[2]) + ']')
+				# FIXME: how to inform caller about exceptions while executing his callbacks? Currently we log them, no other information.
+				if result:
+					for idx, res in enumerate(result):
+						if res[0] == None:
+							logger.debug('_SubscriptionAE_Dispatcher.run(): event-firing on SubscriptionAE object: asynchronously started callback no.' + str(idx) + ': handler=' + repr(res[2]))
+						else:
+							logger.debug('_SubscriptionAE_Dispatcher.run(): event-firing on SubscriptionAE object: synchronous callback no.' + str(idx) + ': success=' + str(res[0]) + ', result=' + str(res[1]) + ', handler=' + repr(res[2]))
 
+						# since we process axel.Events synchronously (this could be a bottleneck or risk of blocking!!!) we get success or failure data
+						# =>look in constructor of SubscriptionAE() for details
+						if res[0] == False:
+							# example: res[1] without traceback: (<type 'exceptions.TypeError'>, TypeError("cannot concatenate 'str' and 'int' objects",))
+							#          =>when traceback=True, then ID of traceback object is added to the part above.
+							#            Assumption: traceback is not needed. It would be useful when debugging client code...
+							logger.error('_SubscriptionAE_Dispatcher.run(): event-firing on SubscriptionAE object: synchronous callback no.' + str(idx) + ' failed: ' + str(res[1]) + ' [handler=' + repr(res[2]) + ']')
+				else:
+					logger.info('_SubscriptionAE_Dispatcher.run(): event-firing had no effect (all handlers of SubscriptionAE object were removed while waiting in event queue...) [DMS-key="' + event_obj.path + '" / tag=' + event_obj.tag + ']')
+
+				# diagnostic values
+				duration_secs = self._time_secs_new - self._time_secs_old
+				if duration_secs > CALLBACK_DURATION_WARNLEVEL:
+					logger.warn('_SubscriptionAE_Dispatcher.run(): event-firing on SubscriptionAE object [DMS-key="' + event_obj.path + '" / tag=' + event_obj.tag + '] took ' + str(duration_secs) + ' seconds... =>you should shorten your callback functions!')
+				if self._event_q.qsize() > EVENTQUEUE_WARNSIZE and self._do_warn_queuesize:
+					self._do_warn_queuesize = False
+					logger.warn('_SubscriptionAE_Dispatcher.run(): number of waiting events is over ' + str(EVENTQUEUE_WARNSIZE) + '... =>you should shorten your callback functions and unsubscribe BEFORE removing handlers of SubscriptionAE object!')
+				if self._event_q.qsize() < EVENTQUEUE_WARNSIZE:
+					self._do_warn_queuesize = True
 
 
 class DMSClient(object):
@@ -1774,23 +1855,23 @@ class DMSClient(object):
 
 
 	# API
-	def dp_get(self, path, timeout=TIMEOUT, **kwargs):
+	def dp_get(self, path, timeout=REQ_TIMEOUT, **kwargs):
 		""" read datapoint value(s) """
 		return self._msghandler.dp_get(path, timeout=timeout, **kwargs)
 
-	def dp_set(self, path, timeout=TIMEOUT, **kwargs):
+	def dp_set(self, path, timeout=REQ_TIMEOUT, **kwargs):
 		""" write datapoint value(s) """
 		return self._msghandler.dp_set(path, timeout=timeout, **kwargs)
 
-	def dp_del(self, path, recursive, timeout=TIMEOUT, **kwargs):
+	def dp_del(self, path, recursive, timeout=REQ_TIMEOUT, **kwargs):
 		""" delete datapoint(s) """
 		return self._msghandler.dp_del(path, recursive, timeout=timeout, **kwargs)
 
-	def dp_ren(self, path, newPath, timeout=TIMEOUT, **kwargs):
+	def dp_ren(self, path, newPath, timeout=REQ_TIMEOUT, **kwargs):
 		""" rename datapoint(s) """
 		return self._msghandler.dp_ren(path, newPath, timeout=timeout, **kwargs)
 
-	def get_dp_subscription(self, path, timeout=TIMEOUT, **kwargs):
+	def get_dp_subscription(self, path, timeout=REQ_TIMEOUT, **kwargs):
 		""" subscribe monitoring of datapoints(s) """
 		# FIXME: now we care only the first response... is this ok in every case?
 		response = self._msghandler.dp_sub(path, timeout=timeout, **kwargs)[0]
@@ -1804,11 +1885,11 @@ class DMSClient(object):
 		else:
 			raise Exception(u'DMS ignored subscription of "' + path + '" with error "' + response.code + '"!')
 
-	def changelog_GetGroups(self, timeout=TIMEOUT, **kwargs):
+	def changelog_GetGroups(self, timeout=REQ_TIMEOUT, **kwargs):
 		""" get list of available changelog groups """
 		return self._msghandler.changelog_GetGroups(timeout=timeout, **kwargs)
 
-	def changelog_Read(self, group, start, timeout=TIMEOUT, **kwargs):
+	def changelog_Read(self, group, start, timeout=REQ_TIMEOUT, **kwargs):
 		""" get protocol entries in given changelog group """
 		return self._msghandler.changelog_Read(group, start, timeout=timeout, **kwargs)
 
@@ -1842,8 +1923,8 @@ class DMSClient(object):
 
 	def _cb_on_close(self, ws):
 		logger.info("DMSClient: websocket callback _on_close(): server closed connection =>shutting down own client thread")
-		self._subAE_disp_thread.keep_running = False
 		self.ready_to_send.clear()
+		self._exit_subAE_thread()
 		self._exit_ws_thread()
 
 	def __del__(self):
@@ -1881,242 +1962,249 @@ class DMSClient(object):
 if __name__ == '__main__':
 
 
-	#test_set = set(['ws'] + range(18))
-	#test_set = set(['ws', 11])
-	test_set = set(['contextmanager'])
+	# if 'ws' in test_set:
+	# 	myClient = DMSClient(u'test', u'user')
+	# 	#myClient = DMSClient(u'test', u'user', dms_host_str="127.0.0.1", dms_port_int=1234)
+	# 	print('\n=>WebSocket connection runs now in background...')
+	#
+	# 	# while True:
+	# 	# 	time.sleep(1)
+	# 	# 	print('sending TESTMSG...')
+	# 	# 	myClient._send_message(TESTMSG)
 
-	if 'contextmanager' in test_set:
-		with DMSClient(u'test', u'user') as myClient:
-			print('\nTesting creation of Request command:')
-			print('"get":')
-			response = myClient.dp_get(path="System:Time")
-			print('response to our request: ' + repr(response))
-			print('\tresponse[0].value=' + repr(response[0].value))
-
-
-	if 'ws' in test_set:
-		myClient = DMSClient(u'test', u'user')
-		#myClient = DMSClient(u'test', u'user', dms_host_str="127.0.0.1", dms_port_int=1234)
-		print('\n=>WebSocket connection runs now in background...')
-
-		# while True:
-		# 	time.sleep(1)
-		# 	print('sending TESTMSG...')
-		# 	myClient._send_message(TESTMSG)
-
-	if 0 in test_set:
-		print('\nTesting single classes....')
-		myobj = Query(regExPath=u'.*')
-		print('myobj: ' + repr(myobj) + ', as string: ' + str(myobj) + ', has type ' + str(type(myobj)))
-		print('myobj["regExPath"]= ' + repr(myobj["regExPath"]))
+	test_set = set([11])
 
 
-	if 1 in test_set:
+	with DMSClient(u'test', u'user') as myClient:
 		print('\nTesting creation of Request command:')
 		print('"get":')
-		attribute_list = list(_Response._fields) + list(RespGet._fields)
-		for x in range(3):
-			response = myClient.dp_get(path="System:Time")
-			print('response to our request: ' + repr(response))
-			# test of magic method "__getattr__()" implemented in class _Mydict()
-			# =>user simply can write "response[0].code" or the ususal "response[0].['code']"
-			for name in attribute_list:
-				print('\tresponse[0].' + name + ' =\t' + repr(getattr(response[0], name)))
-			print('*' * 20)
-
-	if 2 in test_set:
-		print('\n\nNow doing loadtest:')
-		DEBUGGING = False
-		nof_tests = 1000
-		for x in xrange(nof_tests):
-			response = myClient.dp_get(path="System:Time")
-		print('We have done ' + str(nof_tests) + ' requests. :-) Does it still work?')
-		DEBUGGING = True
-		print('*' * 20)
 		response = myClient.dp_get(path="System:Time")
 		print('response to our request: ' + repr(response))
-		print('*' * 20)
-
-	if 3 in test_set:
-		print('\nNow testing query function:')
-		print('\twithout query: ' + repr(myClient.dp_get(path="")))
-		print('\twith query: ' + repr(myClient.dp_get(path="",
-		                                              query=Query(regExPath=".*", maxDepth=1)
-		                                              )
-		                              )
-		      )
+		print('\tresponse[0].value=' + repr(response[0].value))
 
 
-	if 4 in test_set:
-		print('\nTesting retrieving HistData:')
-		DEBUGGING = True
-		response = myClient.dp_get(path="MSR01:Ala101:Output_Lampe",
-		                           histData=HistData(start="2017-12-05T19:00:00,000+02:00",
-		                                             #end="2017-12-05T19:35:00,000+02:00",
-		                                             #format="compact",
-		                                             format="detail",
-		                                             interval=0
-		                                             ),
-		                           showExtInfos=INFO_ALL
-		                           )
-		print('response: ' + repr(response))
 
-	if 5 in test_set:
-		print('\nTesting writing of DMS datapoint:')
-		response = myClient.dp_set(path="MSR01:Test_str",
-		                           #value=80*"x",
-		                           value="abc",
-		                           create=True)
-		print('response: ' + repr(response))
 
-	if 6 in test_set:
-		print('\nTesting retrieving of value from test no.5:')
-		print('"get":')
-		response = myClient.dp_get(path="MSR01:Test_str")
-		print('response to our request: \n' + repr(response))
+		if 0 in test_set:
+			print('\nTesting single classes....')
+			myobj = Query(regExPath=u'.*')
+			print('myobj: ' + repr(myobj) + ', as string: ' + str(myobj) + ', has type ' + str(type(myobj)))
+			print('myobj["regExPath"]= ' + repr(myobj["regExPath"]))
 
-	if 7 in test_set:
-		print('\nTesting writing of DMS datapoint:')
-		response = myClient.dp_set(path="MSR01:Test_int",
-		                           value=123,
-		                           create=True)
-		print('response: ' + repr(response))
 
-	if 8 in test_set:
-		print('\nTesting renaming of DMS datapoint:')
-		response = myClient.dp_ren(path="MSR01:Test_int",
-		                           newPath="MSR01:Test_int2")
-		print('response: ' + repr(response))
+		if 1 in test_set:
+			print('\nTesting creation of Request command:')
+			print('"get":')
+			attribute_list = list(_Response._fields) + list(RespGet._fields)
+			for x in range(3):
+				response = myClient.dp_get(path="System:Time")
+				print('response to our request: ' + repr(response))
+				# test of magic method "__getattr__()" implemented in class _Mydict()
+				# =>user simply can write "response[0].code" or the ususal "response[0].['code']"
+				for name in attribute_list:
+					print('\tresponse[0].' + name + ' =\t' + repr(getattr(response[0], name)))
+				print('*' * 20)
 
-	if 9 in test_set:
-		print('\nTesting deletion of DMS datapoint:')
-		response = myClient.dp_del(path="MSR01:Test_int2",
-		                           recursive=False)
-		print('response: ' + repr(response))
-
-	if 10 in test_set:
-		print('\nTesting retrieving of whole BMO:')
-		print('"get":')
-		for x in range(3):
-			response = myClient.dp_get(path="MSR01:And102",
-			                           showExtInfos=INFO_ALL,
-			                           query=Query(maxDepth=-1),
-			                           )
+		if 2 in test_set:
+			print('\n\nNow doing loadtest:')
+			DEBUGGING = False
+			nof_tests = 1000
+			for x in xrange(nof_tests):
+				response = myClient.dp_get(path="System:Time")
+			print('We have done ' + str(nof_tests) + ' requests. :-) Does it still work?')
+			DEBUGGING = True
+			print('*' * 20)
+			response = myClient.dp_get(path="System:Time")
 			print('response to our request: ' + repr(response))
 			print('*' * 20)
 
-	if 11 in test_set:
-		DEBUGGING = False
-		dms_blinker_str = "System:Blinker:Blink1.0"
-		print('Testing monitoring of DMS datapoint "' + dms_blinker_str + '"')
-		sub = myClient.get_dp_subscription(path=dms_blinker_str,
-		                                   event=ON_ALL,
-		                                   query=Query(maxDepth=-1))
-		print('got Subscription object: ' + repr(sub))
-		print('adding callback function:')
-		def myfunc(event):
-			print('\t\tmyfunc(): GOT EVENT: ' + repr(event))
-		sub += myfunc
-
-		def myfunc2(event):
-			# testing logging of exception in callback function: TypeError("cannot concatenate 'str' and 'int' objects",)
-			print('\t\tmyfunc2(): GOT EVENT: ' + repr(event) + 1)
-		sub += myfunc2
-
-		print('waiting some seconds while callback should getting fired in background...')
-		for x in range(30):
-			time.sleep(0.1)
-
-		print('changing eventfilter in DMS subscription...')
-		sub.update(event='*')
-		for x in range(30):
-			time.sleep(0.1)
-
-		print('waiting some seconds with active DMS subscription but without Python callbackfunction...')
-		sub -= myfunc
-		sub -= myfunc2
-		for x in range(30):
-			time.sleep(0.1)
-
-		print('unsubscription test...')
-		sub.unsubscribe()
-
-		print('waiting some seconds while no new event should fire...')
-		for x in range(30):
-			time.sleep(0.1)
-
-		print('Done.')
+		if 3 in test_set:
+			print('\nNow testing query function:')
+			print('\twithout query: ' + repr(myClient.dp_get(path="")))
+			print('\twith query: ' + repr(myClient.dp_get(path="",
+			                                              query=Query(regExPath=".*", maxDepth=1)
+			                                              )
+			                              )
+			      )
 
 
+		if 4 in test_set:
+			print('\nTesting retrieving HistData:')
+			DEBUGGING = True
+			response = myClient.dp_get(path="MSR01:Ala101:Output_Lampe",
+			                           histData=HistData(start="2017-12-05T19:00:00,000+02:00",
+			                                             #end="2017-12-05T19:35:00,000+02:00",
+			                                             #format="compact",
+			                                             format="detail",
+			                                             interval=0
+			                                             ),
+			                           showExtInfos=INFO_ALL
+			                           )
+			print('response: ' + repr(response))
 
-	if 12 in test_set:
-		DEBUGGING = False
-		dms_path_str = ""
-		print('Testing monitoring of DMS datapoint "' + dms_path_str + '"')
-		sub = myClient.get_dp_subscription(path=dms_path_str,
-		                                        event=ON_CREATE + ON_DELETE,
-		                                        query=Query(maxDepth=-1))
-		print('got Subscription object: ' + repr(sub))
-		print('adding callback function:')
-		def myfunc(event):
-			print('\t\tGOT EVENT: ' + repr(event))
-		sub += myfunc
+		if 5 in test_set:
+			print('\nTesting writing of DMS datapoint:')
+			response = myClient.dp_set(path="MSR01:Test_str",
+			                           #value=80*"x",
+			                           value="abc",
+			                           create=True)
+			print('response: ' + repr(response))
 
-		print('waiting some seconds while callback should getting fired in background...')
-		for x in range(100):
-			time.sleep(0.1)
+		if 6 in test_set:
+			print('\nTesting retrieving of value from test no.5:')
+			print('"get":')
+			response = myClient.dp_get(path="MSR01:Test_str")
+			print('response to our request: \n' + repr(response))
 
-		print('unsubscription test...')
-		sub.unsubscribe()
-		time.sleep(2)
+		if 7 in test_set:
+			print('\nTesting writing of DMS datapoint:')
+			response = myClient.dp_set(path="MSR01:Test_int",
+			                           value=123,
+			                           create=True)
+			print('response: ' + repr(response))
 
-		print('Done.')
+		if 8 in test_set:
+			print('\nTesting renaming of DMS datapoint:')
+			response = myClient.dp_ren(path="MSR01:Test_int",
+			                           newPath="MSR01:Test_int2")
+			print('response: ' + repr(response))
+
+		if 9 in test_set:
+			print('\nTesting deletion of DMS datapoint:')
+			response = myClient.dp_del(path="MSR01:Test_int2",
+			                           recursive=False)
+			print('response: ' + repr(response))
+
+		if 10 in test_set:
+			print('\nTesting retrieving of whole BMO:')
+			print('"get":')
+			for x in range(3):
+				response = myClient.dp_get(path="MSR01:And102",
+				                           showExtInfos=INFO_ALL,
+				                           query=Query(maxDepth=-1),
+				                           )
+				print('response to our request: ' + repr(response))
+				print('*' * 20)
+
+		if 11 in test_set:
+			DEBUGGING = False
+			dms_blinker_str = "System:Blinker:Blink1.0"
+			print('Testing monitoring of DMS datapoint "' + dms_blinker_str + '"')
+			sub = myClient.get_dp_subscription(path=dms_blinker_str,
+			                                   event=ON_ALL,
+			                                   query=Query(maxDepth=-1))
+			print('got Subscription object: ' + repr(sub))
+			print('adding callback function:')
+			def myfunc(event):
+				print('\t\tmyfunc(): GOT EVENT: ' + repr(event))
+				## test of infinite callback function
+				#while True:
+				#	pass
+				time.sleep(CALLBACK_DURATION_WARNLEVEL + 2)
+			#sub += myfunc
+			# test of timeout
+			sub += {'handler': myfunc, 'memoize': False, 'timeout': CALLBACK_MAX_TIMEOUT + 2 }
+
+			def myfunc2(event):
+				# testing logging of exception in callback function: TypeError("cannot concatenate 'str' and 'int' objects",)
+				print('\t\tmyfunc2(): GOT EVENT: ' + repr(event) + 1)
+			sub += myfunc2
+
+			print('waiting some seconds while callback should getting fired in background...')
+			for x in range(30):
+				time.sleep(0.1)
+
+			print('changing eventfilter in DMS subscription...')
+			sub.update(event='*')
+			for x in range(30):
+				time.sleep(0.1)
+
+			print('waiting some seconds with active DMS subscription but without Python callbackfunction...')
+			sub -= myfunc
+			sub -= myfunc2
+			for x in range(30):
+				time.sleep(0.1)
+
+			print('unsubscription test...')
+			sub.unsubscribe()
+
+			print('waiting some seconds while no new event should fire...')
+			for x in range(30):
+				time.sleep(0.1)
+
+			print('Done.')
+			time.sleep(30)
 
 
-	if 13 in test_set:
-		print('\nTesting retrieving Changelog:')
-		DEBUGGING = True
-		response = myClient.dp_get(path="MSR01:Ala101:Hand",
-		                           changelog=Changelog(start="2017-12-05T19:00:00,000+02:00",
-		                                               #end="2017-12-05T20:30:00,000+02:00"
-		                                               )
-		                           )
-		print('response: ' + repr(response))
+
+		if 12 in test_set:
+			DEBUGGING = False
+			dms_path_str = ""
+			print('Testing monitoring of DMS datapoint "' + dms_path_str + '"')
+			sub = myClient.get_dp_subscription(path=dms_path_str,
+			                                        event=ON_CREATE + ON_DELETE,
+			                                        query=Query(maxDepth=-1))
+			print('got Subscription object: ' + repr(sub))
+			print('adding callback function:')
+			def myfunc(event):
+				print('\t\tGOT EVENT: ' + repr(event))
+			sub += myfunc
+
+			print('waiting some seconds while callback should getting fired in background...')
+			for x in range(100):
+				time.sleep(0.1)
+
+			print('unsubscription test...')
+			sub.unsubscribe()
+			time.sleep(2)
+
+			print('Done.')
 
 
-	if 14 in test_set:
-		print('\nTesting retrieving Changelog of alarm datapoint:')
-		DEBUGGING = True
-		response = myClient.dp_get(path="MSR01:Bat101:SM_Err",
-		                           changelog=Changelog(start="2017-12-05T19:00:00,000+02:00",
-		                                               #end="2017-12-05T20:30:00,000+02:00"
-		                                               )
-		                           )
-		print('response: ' + repr(response))
+		if 13 in test_set:
+			print('\nTesting retrieving Changelog:')
+			DEBUGGING = True
+			response = myClient.dp_get(path="MSR01:Ala101:Hand",
+			                           changelog=Changelog(start="2017-12-05T19:00:00,000+02:00",
+			                                               #end="2017-12-05T20:30:00,000+02:00"
+			                                               )
+			                           )
+			print('response: ' + repr(response))
 
 
-	if 15 in test_set:
-		print('\nTesting retrieving ExtInfos:')
-		DEBUGGING = True
-		response = myClient.dp_get(path="MSR01:Ala101:Hand",
-		                           showExtInfos=INFO_ALL
-		                           )
-		print('response: ' + repr(response))
+		if 14 in test_set:
+			print('\nTesting retrieving Changelog of alarm datapoint:')
+			DEBUGGING = True
+			response = myClient.dp_get(path="MSR01:Bat101:SM_Err",
+			                           changelog=Changelog(start="2017-12-05T19:00:00,000+02:00",
+			                                               #end="2017-12-05T20:30:00,000+02:00"
+			                                               )
+			                           )
+			print('response: ' + repr(response))
 
 
-	if 16 in test_set:
-		print('\nTesting retrieving available changelog groups:')
-		DEBUGGING = True
-		response = myClient.changelog_GetGroups()
-		print('response: ' + repr(response))
+		if 15 in test_set:
+			print('\nTesting retrieving ExtInfos:')
+			DEBUGGING = True
+			response = myClient.dp_get(path="MSR01:Ala101:Hand",
+			                           showExtInfos=INFO_ALL
+			                           )
+			print('response: ' + repr(response))
+
+
+		if 16 in test_set:
+			print('\nTesting retrieving available changelog groups:')
+			DEBUGGING = True
+			response = myClient.changelog_GetGroups()
+			print('response: ' + repr(response))
 
 
 
-	if 17 in test_set:
-		print('\nTesting retrieving available protocol entries in changelog group:')
-		DEBUGGING = True
-		response = myClient.changelog_Read(group=u'Hand',
-		                                   start="2017-12-05T19:00:00,000+02:00",
-		                                   #end="2017-12-10T20:30:00,000+02:00"
-		                                   )
-		print('response: ' + repr(response))
+		if 17 in test_set:
+			print('\nTesting retrieving available protocol entries in changelog group:')
+			DEBUGGING = True
+			response = myClient.changelog_Read(group=u'Hand',
+			                                   start="2017-12-05T19:00:00,000+02:00",
+			                                   #end="2017-12-10T20:30:00,000+02:00"
+			                                   )
+			print('response: ' + repr(response))
