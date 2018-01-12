@@ -28,7 +28,7 @@
 #        =>remark6: the modules "math" and "random" are available (e.g. for random.choice([True, False]), or for constant math.pi)
 #                   https://docs.python.org/2/library/math.html
 #                   https://docs.python.org/2/library/random.html
-                    https://docs.python.org/2/library/string.html
+#                   https://docs.python.org/2/library/string.html
 #  result: DMS-datapoint must exist with correct datatype
 #  do_caching:      flag for caching the last few results, must be "false" when there's dynamic value in expression (e.g. methods from module "random")
 #
