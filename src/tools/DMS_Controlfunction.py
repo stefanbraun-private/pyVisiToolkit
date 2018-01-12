@@ -23,10 +23,12 @@ import logging
 import yaml
 import time
 import threading
+import collections
 
 # modules for usage in given expressions
 import math
 import random
+import string
 
 
 # setup of logging
@@ -55,10 +57,14 @@ TYPE_MAPPING = {u'int': int,
 	            u'string': unicode,
 	            u'bool': bool}
 
+# function result caching
+CACHING_MAX_NOF_ELEMS = 1000
+
+
 class DMSDatapoint(object):
 	def __init__(self, dms_ws, key_str):
 		self._dms_ws = dms_ws
-		self.key_str = key_str
+		self.key_str = str(key_str)
 		self._value = None
 		self._datatype = None
 
@@ -135,7 +141,7 @@ class DMSDatapoint_Var(DMSDatapoint):
 
 	# callback function for DMS event
 	def _cb_changed_value(self, event):
-		logger.debug('DMSDatapoint_Var._cb_changed_value(): callback for DMS key "' + self.key_str + '" was fired...')
+		logger.debug('DMSDatapoint_Var._cb_changed_value(): callback for DMS key "' + self.key_str + '" was fired... [event.value=' + repr(event.value)+']')
 		self._value = event.value
 		self._datatype = event.type
 
@@ -155,7 +161,7 @@ class DMSDatapoint_Var(DMSDatapoint):
 		#  executing _MessageHandler._send_message() in _MessageHandler.handle() while firing SubscriptionAE() is not possible...)
 		for func_obj in self._curr_func_list:
 			func_obj.result_dirty.set()
-		logger.debug('DMSDatapoint_Var._cb_set_value(): callback for DMS key "' + self.key_str + '" is done.')
+		logger.debug('DMSDatapoint_Var._cb_changed_value(): callback for DMS key "' + self.key_str + '" is done.')
 
 
 	def subscribe(self):
@@ -181,13 +187,50 @@ class DMSDatapoint_Var(DMSDatapoint):
 
 
 class Controlfunction(object):
-	def __init__(self, name_str, expr_str, result_var, do_dryrun):
+
+	# class attribute: cache results for all functions (improving performance if possible)
+	# =>we use an OrderedDict for getting a FIFO cache with a maximum number of elements
+	_caching_ordereddict = collections.OrderedDict()
+
+
+	def __init__(self, name_str, expr_str, result_var, do_caching, do_dryrun):
 		self._var_dict = {}
-		self._name = name_str
-		self._expr_str = expr_str
+		self._name = str(name_str)
+		self._expr_str = str(expr_str)
 		self._result_var = result_var
-		self._do_dryrun = do_dryrun
+		self._cache_result = bool(do_caching)
+		self._do_dryrun = bool(do_dryrun)
 		self.result_dirty = threading.Event()
+
+	@staticmethod
+	def _get_cached_result(expr_str, locals_dict):
+		""" retrieves cached result (or None when expression was evaluated with new arguments) """
+		# we have to sort keyword arguments for always getting same hash value as key in our dict
+		# =>only tuples can be hashed (we get a tuple of expr and tuples)
+		# (help from https://stackoverflow.com/questions/10220599/how-to-hash-args-kwargs-for-function-cache )
+		key_tuple = (expr_str, ) + tuple(sorted(locals_dict.items()))
+		try:
+			return Controlfunction._caching_ordereddict[key_tuple]
+		except KeyError:
+			logger.debug('Controlfunction._get_cached_result(): found no value for key "' + str(key_tuple) + '"')
+			return None
+
+	@staticmethod
+	def _set_cached_result(expr_str, locals_dict, result):
+		""" store expression, it's result and all function arguments  """
+		key_tuple = (expr_str,) + tuple(sorted(locals_dict.items()))
+		if key_tuple in Controlfunction._caching_ordereddict:
+			# for insertion of new result in front we need to remove if from original position
+			# https://docs.python.org/2/library/collections.html#collections.OrderedDict
+			del(Controlfunction._caching_ordereddict[key_tuple])
+		# insertion in front
+		Controlfunction._caching_ordereddict[key_tuple] = result
+
+		if len(Controlfunction._caching_ordereddict) > CACHING_MAX_NOF_ELEMS:
+			# removing oldest result for keeping size
+			logger.debug('Controlfunction._set_cached_result(): _caching_ordereddict reached maximum length, removing oldest element...')
+			Controlfunction._caching_ordereddict.popitem(last=False)
+
 
 	def add_variable(self, var_name, var_obj):
 		self._var_dict[var_name] = var_obj
@@ -227,22 +270,33 @@ class Controlfunction(object):
 		mylocals = {}
 		for var_name in self._var_dict:
 			mylocals[var_name] = self._var_dict[var_name].get_value()
-		# include allowed modules into local variables dictionary
-		mylocals['math'] = math
-		mylocals['random'] = random
 
 		result_value = None
-		try:
-			# calling eval() mostly safe (according to http://lybniz2.sourceforge.net/safeeval.html )
-			result_value = eval(self._expr_str, {}, mylocals)
-		except Exception as ex:
-			# current expression contains errors...
-			logger.error('Controlfunction.evaluate(): [name: ' + self._name + '] expression "' + repr(self._expr_str) + '" throwed exception ' + repr(ex) + ' with values ' + repr(mylocals))
+		if self._cache_result:
+			result_value = Controlfunction._get_cached_result(expr_str=self._expr_str, locals_dict=mylocals)
 
-		if result_value:
+		if result_value == None:
+			# we need to evaluate the expression
+			# FIXME: currently we evaluate wrong expressions again and again...
+			#  =>should we exclude it? then we should cleanup subscriptions and references variable->functions, ...
+			#
+			#  include allowed modules into local variables dictionary
+			mylocals['math'] = math
+			mylocals['random'] = random
+			mylocals['string'] = string
+			try:
+				# calling eval() mostly safe (according to http://lybniz2.sourceforge.net/safeeval.html )
+				result_value = eval(self._expr_str, {}, mylocals)
+			except Exception as ex:
+				# current expression contains errors...
+				logger.error('Controlfunction.evaluate(): [name: ' + self._name + '] expression "' + repr(self._expr_str) + '" throwed exception ' + repr(ex) + ' with values ' + repr(mylocals))
+
 			# prepare message for logging, removing unwanted parts
 			del(mylocals['math'])
 			del(mylocals['random'])
+			del (mylocals['string'])
+
+		if result_value != None:
 			msg = 'Controlfunction.evaluate(): [name: ' + self._name + '] expression ' + repr(self._expr_str) + ' = ' + repr(result_value) + '   // ' + repr(mylocals)
 			if self._do_dryrun:
 				# only print to console
@@ -255,6 +309,9 @@ class Controlfunction(object):
 				except Exception as ex:
 					logger.error('Controlfunction.evaluate(): [name: ' + self._name + '] could not store result in DMS!')
 
+			if self._cache_result:
+				# store result in cache
+				Controlfunction._set_cached_result(expr_str=self._expr_str, locals_dict=mylocals, result=result_value)
 		# now we say we're done.
 		self.result_dirty.clear()
 
@@ -264,7 +321,7 @@ class Runner(object):
 	def __init__(self, dms_ws, configfile, only_dryrun=None):
 		self._dms_ws = dms_ws
 		self._configfile = configfile
-		self._only_dryrun = only_dryrun
+		self._only_dryrun = bool(only_dryrun)
 		self._functions_dict = {}
 
 
@@ -282,6 +339,7 @@ class Runner(object):
 				curr_ctrlfunc = Controlfunction(name_str=func_name,
 				                                expr_str=func_def['expr'],
 				                                result_var=curr_result_var,
+				                                do_caching=func_def['do_caching'],
 				                                do_dryrun=self._only_dryrun)
 				for var_name, var_dp in func_def['vars'].items():
 					curr_var = DMSDatapoint_Var(dms_ws=self._dms_ws,

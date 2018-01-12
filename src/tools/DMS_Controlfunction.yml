@@ -28,7 +28,9 @@
 #        =>remark6: the modules "math" and "random" are available (e.g. for random.choice([True, False]), or for constant math.pi)
 #                   https://docs.python.org/2/library/math.html
 #                   https://docs.python.org/2/library/random.html
+                    https://docs.python.org/2/library/string.html
 #  result: DMS-datapoint must exist with correct datatype
+#  do_caching:      flag for caching the last few results, must be "false" when there's dynamic value in expression (e.g. methods from module "random")
 #
 #
 # EXAMPLES:
@@ -43,6 +45,7 @@
 #      b: "System:Time:Seconds"
 #    expr: "a + b"
 #    result: "MSR01:Test"
+#    do_caching: true
 ####################################
 
 
@@ -57,6 +60,7 @@ functions:
       b: "System:Time:Seconds"
     expr: "a + b"
     result: "MSR01:Test"
+    do_caching: true
 
   test_2:
   # used during development
@@ -69,3 +73,4 @@ functions:
       d: "System:ALM:Enable"
     expr: "max(a, b) if (not '1.7' in c and d) else random.choice([-1, 0, 1]) + b"
     result: "MSR01:Test2"
+    do_caching: false
