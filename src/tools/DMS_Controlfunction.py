@@ -16,6 +16,8 @@ This program is distributed in the hope that it will be useful, but WITHOUT ANY 
 You should have received a copy of the GNU General Public License along with this program. If not, see <http://www.gnu.org/licenses/>.
 """
 
+DEBUGGING_LEAK = True
+
 
 import dms.dmswebsocket as dms
 import argparse
@@ -29,6 +31,11 @@ import collections
 import math
 import random
 import string
+
+### DEBUGGING memory leak
+# help from https://stackoverflow.com/questions/1641231/python-working-around-memory-leaks/1641280#1641280
+# and https://stackoverflow.com/questions/1396668/get-object-by-id
+import gc
 
 
 # setup of logging
@@ -402,10 +409,53 @@ def main(dms_server, dms_port, only_check, only_dryrun, configfile):
 			# help from http://stackoverflow.com/questions/13180941/how-to-kill-a-while-loop-with-a-keystroke
 			try:
 				logger.info('"DMS_Controlfunction" is working now... Press <CTRL> + C for aborting.')
+
+				old_objs_set = set()
+				nof_runs = 0
+
 				while True:
 					# FIXME: we should implement a more efficient method...
 					runner.evaluate_functions()
 					time.sleep(0.001)
+
+					# DEBUGGING thread leak
+					if DEBUGGING_LEAK:
+						nof_runs += 1
+						if nof_runs == 1000:
+							for obj in gc.get_objects():
+								key = (id(obj), type(obj))
+								old_objs_set.add(key)
+						elif (nof_runs % 4000) == 0:
+							new_objs_set = set()
+							# repeating from while to while
+							for obj in gc.get_objects():
+								key = (id(obj), type(obj))
+								new_objs_set.add(key)
+
+							# detect changes
+							added_objs_set = new_objs_set - old_objs_set
+							removed_objs_set = old_objs_set - new_objs_set
+
+							types_dict = {}
+							if added_objs_set:
+								for curr_id, curr_type in added_objs_set:
+									try:
+										types_dict[curr_type] += 1
+									except KeyError:
+										types_dict[curr_type] = 1
+							if removed_objs_set:
+								for curr_id, curr_type in removed_objs_set:
+									try:
+										types_dict[curr_type] -= 1
+									except KeyError:
+										types_dict[curr_type] = -1
+							# help for dict comprehension: https://stackoverflow.com/questions/2844516/how-to-filter-a-dictionary-according-to-an-arbitrary-condition-function
+							logger.info('DEBUGGING: differences in number of objects: ' + repr({k: v for k, v in types_dict.iteritems() if v != 0}))
+
+							# preparing next cycle
+							old_objs_set = new_objs_set
+
+
 			except KeyboardInterrupt:
 				pass
 	logger.info('Quitting "DMS_Controlfunction"...')

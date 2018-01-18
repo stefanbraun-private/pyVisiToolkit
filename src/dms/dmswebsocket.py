@@ -1298,7 +1298,7 @@ class SubscriptionAE(axel.Event):
 		#  https://docs.python.org/2/library/sys.html
 		# ==>currently we execute all callbacks synchronously in thread _SubscriptionAE_Dispatcher,
 		#    one event-firing is done when all of it's handlers are done.
-		super(SubscriptionAE, self).__init__(threads=5,
+		super(SubscriptionAE, self).__init__(threads=3,
 		                                     exc_info=True,
 		                                     traceback=False)
 
@@ -1698,6 +1698,14 @@ class _MessageHandler(object):
 						self._subAE_queue.put((subAE, event_obj))
 					else:
 						logger.info('_MsgHandler.handle(): SubscriptionsAE object is empty, suppressing firing of axel.Event...')
+
+					# help garbage collector
+					# (FIXME: execution in PyCharm works, execution as freezed code with py2exe has thread and/or memory leakage... Why?!?)
+					for obj in [subAE, event_obj]:
+						try:
+							del (obj)
+						except NameError:
+							pass
 				except AttributeError:
 					logger.exception("exception in _MessageHandler.handle(): DMS-event seems corrupted")
 				except KeyError:
@@ -1821,6 +1829,14 @@ class _SubscriptionAE_Dispatcher(threading.Thread):
 					logger.warn('_SubscriptionAE_Dispatcher.run(): number of waiting events is over ' + str(EVENTQUEUE_WARNSIZE) + '... =>you should shorten your callback functions and unsubscribe BEFORE removing handlers of SubscriptionAE object!')
 				if self._event_q.qsize() < EVENTQUEUE_WARNSIZE:
 					self._do_warn_queuesize = True
+
+				# help garbage collector
+				# (FIXME: execution in PyCharm works, execution as freezed code with py2exe has thread and/or memory leakage... Why?!?)
+				for obj in [subAE, event_obj, result]:
+					try:
+						del(obj)
+					except NameError:
+						pass
 
 
 class DMSClient(object):
