@@ -57,6 +57,12 @@ import queue
 import axel
 
 
+# lightweight event handling with _EventSystem()
+import copy
+import sys
+
+
+
 # setup of logging
 # (based on tutorial https://docs.python.org/2/howto/logging.html )
 # create logger =>set level to DEBUG if you want to catch all log messages!
@@ -1276,10 +1282,188 @@ class RespChangelogRead(_Mydict, _Response):
 		return u'RespChangelogRead(' + repr(self._values_dict) + u')'
 
 
+class _EventSystem(object):
+	''' lightweight event system with similar interface as "axel event" '''
+	# registered handlers getting called when event gets fired
+	# using parts from "axel events" https://github.com/axel-events/axel
+	# and "event system" from http://www.valuedlessons.com/2008/04/events-in-python.html
+	# =>differences to "axel events":
+	#     -executes handlers synchronously in same thread
+	#     -uses a fixed timeout for every handler function
+	# =>differences to "event system from valuedlessons.com":
+	#     -using list of handlers instead of set (fixed execution order, allowing registration of callback multiple times)
+	#
+	# The execution result is returned as a tuple having this structure
+     #        exec_result = [
+     #            (True, result, handler),        # on success
+     #            (False, error_info, handler),   # on error
+     #            (None, None, handler), ...      # asynchronous execution //FIXME: this mode is not yet implemented
+     #        ]
+
+	def __init__(self, timeout_secs=5, exc_info=True, traceback=False):
+		self._timeout_secs = timeout_secs
+		self._exc_info = exc_info
+		self._traceback = traceback
+		self._handler_list = []
+		self._hlock = threading.RLock()
+
+
+	class _Spawn_thread(threading.Thread):
+		""" Spawns a new thread and returns the execution result """
+
+		def __init__(self, target, args=(), kw={}, default=None):
+			threading.Thread.__init__(self)
+			self._target = target
+			self._args = args
+			self._kwargs = kw
+			self.result = default
+			self.exc_info = None
+
+		def run(self):
+			try:
+				self.result = self._target(*self._args, **self._kwargs)
+			except:
+				self.exc_info = sys.exc_info()
+			finally:
+				del self._target, self._args, self._kwargs
+
+
+	def handle(self, handler):
+		""" register a handler (add a callback function) """
+		with self._hlock:
+			self._handler_list.append(handler)
+		return self
+
+	def unhandle(self, handler):
+		""" unregister handler (removing callback function) """
+		with self._hlock:
+			try:
+				self._handler_list.remove(handler)
+			except:
+				raise ValueError("Handler is not handling this event, so cannot unhandle it.")
+		return self
+
+	def fire(self, *args, **kargs):
+		""" collects results of all executed handlers """
+
+		# allow register/unregister while execution
+		# (a shallowcopy should be okay.. https://docs.python.org/2/library/copy.html )
+		with self._hlock:
+			handler_list = copy.copy(self._handler_list)
+		result_list = []
+		for handler in handler_list:
+			result = self._execute(handler, *args, **kargs)
+			if isinstance(result, tuple) and len(result) == 3 and isinstance(result[1], Exception):
+				# error occurred
+				one_res_tuple = (False, self._error(result), handler)
+			else:
+				one_res_tuple = (True, result, handler)
+				result_list.append(one_res_tuple)
+		return result_list
+
+	def _execute(self, handler, *args, **kargs):
+		""" executes one callback function with hard timeout """
+		t = _EventSystem._Spawn_thread(target=handler, args=args, kw=kargs)
+		t.daemon = True
+		t.start()
+		t.join(self._timeout_secs)
+
+		if not t.is_alive():
+			if t.exc_info:
+				return t.exc_info
+			return t.result
+		else:
+			try:
+				msg = '[%s] Execution was forcefully terminated'
+				raise RuntimeError(msg % t.name)
+			except:
+				return sys.exc_info()
+
+	def _error(self, exc_info):
+		""" Retrieves the error info """
+		if self._exc_info:
+			if self._traceback:
+				return exc_info
+			return exc_info[:2]
+		return exc_info[1]
+
+
+	def getHandlerCount(self):
+		with self._hlock:
+			return len(self._handler_list)
+
+
+	def clear(self):
+		""" Discards all registered handlers """
+		with self._hlock:
+			self._handler_list = []
+
+
+	__iadd__ = handle
+	__isub__ = unhandle
+	__call__ = fire
+	__len__ = getHandlerCount
+
+	def __repr__(self):
+		""" developer representation of this object """
+		return u'_EventSystem(' + repr(self._handler_list) + u')'
 
 
 
-class SubscriptionAE(axel.Event):
+class SubscriptionAE(_EventSystem):
+	''' mapping python callbacks to DMS events '''
+	# =>caller has to attach his callback functions to this object.
+	# (Factory for this object is in DMSClient.get_dp_subscription())
+
+	def __init__(self, msghandler, sub_response):
+		self._msghandler = msghandler
+		self.sub_response = sub_response  # original DMS response (instance of RespSub())
+		super(SubscriptionAE, self).__init__()
+
+
+	def get_tag(self):
+		return self.sub_response[u'tag']
+
+
+	def update(self, **kwargs):
+		# FIXME for performance: detect changes in "query" and "event",
+		# if changed, then overwrite subscription in DMS,
+		# else resubscribe (currently we send request in every case...)
+		# FIXME: how to report errors to caller?
+
+		# reuse "path" and "tag", then DMS will replace subscription
+		assert not u'path' in kwargs, u'DMS uses path and tag for identifying subscription. Changing is not allowed!'
+		assert not u'tag' in kwargs, u'DMS uses path and tag for identifying subscription. Changing is not allowed!'
+		if u'path' in kwargs:
+			del (kwargs[u'path'])
+		kwargs[u'tag'] = self.sub_response[u'tag']
+		resp = self._msghandler.dp_sub(path=self.sub_response[u'path'], **kwargs)
+
+
+	def unsubscribe(self):
+		# FIXME: how to report errors to caller?
+		resp = self._msghandler._dp_unsub(path=self.sub_response[u'path'],
+		                                  tag=self.sub_response[u'tag'])
+		self._msghandler.del_subscription(self)
+
+
+	def __del__(self):
+		# destructor: being friendly: unsubscribe from DMS for stopping events
+		try:
+			# on shutting down Python program this could raise an TypeError
+			self.unsubscribe()
+		except TypeError:
+			pass
+
+	def __repr__(self):
+		""" developer representation of this object """
+		return u'SubscriptionAE(self.sub_response=' + repr(self.sub_response) + u')'
+
+
+
+
+###### FIXME: thread/memory leakage when code is freezed with py2exe... Perhaps a bug in this code?!?!? =>build own Event.
+class _SubscriptionAE(axel.Event):
 	''' mapping python callbacks to DMS events '''
 	# extending "axel events" for events handling https://github.com/axel-events/axel
 	# =>caller has to attach his callback functions to this object.
