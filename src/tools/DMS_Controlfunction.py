@@ -16,7 +16,9 @@ This program is distributed in the hope that it will be useful, but WITHOUT ANY 
 You should have received a copy of the GNU General Public License along with this program. If not, see <http://www.gnu.org/licenses/>.
 """
 
-DEBUGGING_LEAK = True
+## bug-hunting when every DMS event started a new thread while old threads didn't die...
+## (it seems bug is in Axel Events or the way how I use it's event handling in dmswebsocket.py)
+#DEBUGGING_LEAK = True
 
 
 import dms.dmswebsocket as dms
@@ -32,10 +34,10 @@ import math
 import random
 import string
 
-### DEBUGGING memory leak
-# help from https://stackoverflow.com/questions/1641231/python-working-around-memory-leaks/1641280#1641280
-# and https://stackoverflow.com/questions/1396668/get-object-by-id
-import gc
+# ### DEBUGGING memory leak
+# # help from https://stackoverflow.com/questions/1641231/python-working-around-memory-leaks/1641280#1641280
+# # and https://stackoverflow.com/questions/1396668/get-object-by-id
+# import gc
 
 
 # setup of logging
@@ -140,6 +142,7 @@ class DMSDatapoint_Var(DMSDatapoint):
 		super(DMSDatapoint_Var, self).__init__(dms_ws, key_str)
 		# monitoring of a datapoint allows us to cache it's state
 		self._is_available_cached = False
+		self._val_lock = threading.Lock()
 
 	def add_function(self, curr_func):
 		# backreference to function where this variable is used
@@ -148,27 +151,32 @@ class DMSDatapoint_Var(DMSDatapoint):
 
 	# callback function for DMS event
 	def _cb_changed_value(self, event):
-		logger.debug('DMSDatapoint_Var._cb_changed_value(): callback for DMS key "' + self.key_str + '" was fired... [event.value=' + repr(event.value)+']')
-		self._value = event.value
-		self._datatype = event.type
+		if event.path == self.key_str:
+			with self._val_lock:
+				logger.debug('DMSDatapoint_Var._cb_changed_value(): callback for DMS key "' + self.key_str + '" was fired... [event.value=' + repr(event.value)+']')
+				self._value = event.value
+				self._datatype = event.type
 
-		# interpretation of current datapoint state
-		if event.code in (dms.DMSEvent.CODE_SET, dms.DMSEvent.CODE_CREATE):
-			self._is_available_cached = True
-		elif event.code is dms.DMSEvent.CODE_DELETE:
-			self._is_available_cached = False
+				# interpretation of current datapoint state
+				if event.code in (dms.DMSEvent.CODE_SET, dms.DMSEvent.CODE_CREATE):
+					self._is_available_cached = True
+				elif event.code is dms.DMSEvent.CODE_DELETE:
+					self._is_available_cached = False
+				else:
+					logger.error('internal error: DMSDatapoint_Var._cb_changed_value(): callback for DMS key "' + self.key_str + '" contains unexpected code "' + repr(event.code) + ', check subscribe().')
+
+
+				# inform all Controlfunctions of changed value
+				# =>main thread will check this
+				# (in an older version this callback directly called evaluate(),
+				#  this leaded to deadlock in dmswebsocket:
+				#  executing _MessageHandler._send_message() in _MessageHandler.handle() while firing SubscriptionES() is not possible...)
+				for func_obj in self._curr_func_list:
+					func_obj.result_dirty.set()
+				logger.debug('DMSDatapoint_Var._cb_changed_value(): callback for DMS key "' + self.key_str + '" is done.')
 		else:
-			logger.error('internal error: DMSDatapoint_Var._cb_changed_value(): callback for DMS key "' + self.key_str + '" contains unexpected code "' + repr(event.code) + ', check subscribe().')
-
-
-		# inform all Controlfunctions of changed value
-		# =>main thread will check this
-		# (in an older version this callback directly called evaluate(),
-		#  this leaded to deadlock in dmswebsocket:
-		#  executing _MessageHandler._send_message() in _MessageHandler.handle() while firing SubscriptionAE() is not possible...)
-		for func_obj in self._curr_func_list:
-			func_obj.result_dirty.set()
-		logger.debug('DMSDatapoint_Var._cb_changed_value(): callback for DMS key "' + self.key_str + '" is done.')
+			logger.error('DMSDatapoint_Var._cb_changed_value(): subscription error: callback for DMS key "' + self.key_str + '" was fired with event.path=' + event.path + '!')
+		event = None
 
 
 	def subscribe(self):
@@ -410,50 +418,50 @@ def main(dms_server, dms_port, only_check, only_dryrun, configfile):
 			try:
 				logger.info('"DMS_Controlfunction" is working now... Press <CTRL> + C for aborting.')
 
-				old_objs_set = set()
-				nof_runs = 0
+				# old_objs_set = set()
+				# nof_runs = 0
 
 				while True:
 					# FIXME: we should implement a more efficient method...
 					runner.evaluate_functions()
 					time.sleep(0.001)
 
-					# DEBUGGING thread leak
-					if DEBUGGING_LEAK:
-						nof_runs += 1
-						if nof_runs == 1000:
-							for obj in gc.get_objects():
-								key = (id(obj), type(obj))
-								old_objs_set.add(key)
-						elif (nof_runs % 4000) == 0:
-							new_objs_set = set()
-							# repeating from while to while
-							for obj in gc.get_objects():
-								key = (id(obj), type(obj))
-								new_objs_set.add(key)
-
-							# detect changes
-							added_objs_set = new_objs_set - old_objs_set
-							removed_objs_set = old_objs_set - new_objs_set
-
-							types_dict = {}
-							if added_objs_set:
-								for curr_id, curr_type in added_objs_set:
-									try:
-										types_dict[curr_type] += 1
-									except KeyError:
-										types_dict[curr_type] = 1
-							if removed_objs_set:
-								for curr_id, curr_type in removed_objs_set:
-									try:
-										types_dict[curr_type] -= 1
-									except KeyError:
-										types_dict[curr_type] = -1
-							# help for dict comprehension: https://stackoverflow.com/questions/2844516/how-to-filter-a-dictionary-according-to-an-arbitrary-condition-function
-							logger.info('DEBUGGING: differences in number of objects: ' + repr({k: v for k, v in types_dict.iteritems() if v != 0}))
-
-							# preparing next cycle
-							old_objs_set = new_objs_set
+					# # DEBUGGING thread leak
+					# if DEBUGGING_LEAK:
+					# 	nof_runs += 1
+					# 	if nof_runs == 1000:
+					# 		for obj in gc.get_objects():
+					# 			key = (id(obj), type(obj))
+					# 			old_objs_set.add(key)
+					# 	elif (nof_runs % 4000) == 0:
+					# 		new_objs_set = set()
+					# 		# repeating from while to while
+					# 		for obj in gc.get_objects():
+					# 			key = (id(obj), type(obj))
+					# 			new_objs_set.add(key)
+					#
+					# 		# detect changes
+					# 		added_objs_set = new_objs_set - old_objs_set
+					# 		removed_objs_set = old_objs_set - new_objs_set
+					#
+					# 		types_dict = {}
+					# 		if added_objs_set:
+					# 			for curr_id, curr_type in added_objs_set:
+					# 				try:
+					# 					types_dict[curr_type] += 1
+					# 				except KeyError:
+					# 					types_dict[curr_type] = 1
+					# 		if removed_objs_set:
+					# 			for curr_id, curr_type in removed_objs_set:
+					# 				try:
+					# 					types_dict[curr_type] -= 1
+					# 				except KeyError:
+					# 					types_dict[curr_type] = -1
+					# 		# help for dict comprehension: https://stackoverflow.com/questions/2844516/how-to-filter-a-dictionary-according-to-an-arbitrary-condition-function
+					# 		logger.info('DEBUGGING: differences in number of objects: ' + repr({k: v for k, v in types_dict.iteritems() if v != 0}))
+					#
+					# 		# preparing next cycle
+					# 		old_objs_set = new_objs_set
 
 
 			except KeyboardInterrupt:

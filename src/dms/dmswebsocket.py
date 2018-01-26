@@ -50,16 +50,8 @@ import dateutil.parser, datetime
 import logging
 import queue
 
-# events handling https://github.com/axel-events/axel
-# (=>installed with pip from https://anaconda.org/pypi/axel )
-# january 9th 2018: it seems that this old version 0.0.3 leaks threads... =>trying axel.Event from Github
-# FIXME: how to install it clean on Anaconda / PyCharm? Workaround: including it into pyVisiToolkit directory...
-import axel
-
-
-# lightweight event handling with _EventSystem()
-import copy
-import sys
+# lightweight event handling with homegrew EventSystem()
+from misc.EventSystem import EventSystem
 
 
 
@@ -102,14 +94,10 @@ DMS_BASEPATH = "/json_data" # default for HTTP and WebSocket
 REQ_TIMEOUT = 300
 
 # Python callbacks fired by monitored DMS datapoints (DMS-Events),
-# via thread _SubscriptionAE_Dispatcher
-# =>axel.Event: every handler of an event with duration longer than this time will get terminated (in log: RuntimeException)
-# =>this is the maximum time a long callback function can block our event queue.
-# maximum (and default) timeout in seconds
-CALLBACK_MAX_TIMEOUT = 30
-# log a warning if callback execution duration is long
+# via thread _SubscriptionES_Dispatcher:
+# log a warning if callback execution duration is too long
 # (in seconds)
-CALLBACK_DURATION_WARNLEVEL = int(CALLBACK_MAX_TIMEOUT * 0.9)
+CALLBACK_DURATION_WARNLEVEL = 10
 # log a warning if too many unprocessed events are waiting
 # (number of queue elements)
 EVENTQUEUE_WARNSIZE = 100
@@ -1282,135 +1270,7 @@ class RespChangelogRead(_Mydict, _Response):
 		return u'RespChangelogRead(' + repr(self._values_dict) + u')'
 
 
-class _EventSystem(object):
-	''' lightweight event system with similar interface as "axel event" '''
-	# registered handlers getting called when event gets fired
-	# using parts from "axel events" https://github.com/axel-events/axel
-	# and "event system" from http://www.valuedlessons.com/2008/04/events-in-python.html
-	# =>differences to "axel events":
-	#     -executes handlers synchronously in same thread
-	#     -uses a fixed timeout for every handler function
-	# =>differences to "event system from valuedlessons.com":
-	#     -using list of handlers instead of set (fixed execution order, allowing registration of callback multiple times)
-	#
-	# The execution result is returned as a tuple having this structure
-     #        exec_result = [
-     #            (True, result, handler),        # on success
-     #            (False, error_info, handler),   # on error
-     #            (None, None, handler), ...      # asynchronous execution //FIXME: this mode is not yet implemented
-     #        ]
-
-	def __init__(self, timeout_secs=5, exc_info=True, traceback=False):
-		self._timeout_secs = timeout_secs
-		self._exc_info = exc_info
-		self._traceback = traceback
-		self._handler_list = []
-		self._hlock = threading.RLock()
-
-
-	class _Spawn_thread(threading.Thread):
-		""" Spawns a new thread and returns the execution result """
-
-		def __init__(self, target, args=(), kw={}, default=None):
-			threading.Thread.__init__(self)
-			self._target = target
-			self._args = args
-			self._kwargs = kw
-			self.result = default
-			self.exc_info = None
-
-		def run(self):
-			try:
-				self.result = self._target(*self._args, **self._kwargs)
-			except:
-				self.exc_info = sys.exc_info()
-			finally:
-				del self._target, self._args, self._kwargs
-
-
-	def handle(self, handler):
-		""" register a handler (add a callback function) """
-		with self._hlock:
-			self._handler_list.append(handler)
-		return self
-
-	def unhandle(self, handler):
-		""" unregister handler (removing callback function) """
-		with self._hlock:
-			try:
-				self._handler_list.remove(handler)
-			except:
-				raise ValueError("Handler is not handling this event, so cannot unhandle it.")
-		return self
-
-	def fire(self, *args, **kargs):
-		""" collects results of all executed handlers """
-
-		# allow register/unregister while execution
-		# (a shallowcopy should be okay.. https://docs.python.org/2/library/copy.html )
-		with self._hlock:
-			handler_list = copy.copy(self._handler_list)
-		result_list = []
-		for handler in handler_list:
-			result = self._execute(handler, *args, **kargs)
-			if isinstance(result, tuple) and len(result) == 3 and isinstance(result[1], Exception):
-				# error occurred
-				one_res_tuple = (False, self._error(result), handler)
-			else:
-				one_res_tuple = (True, result, handler)
-				result_list.append(one_res_tuple)
-		return result_list
-
-	def _execute(self, handler, *args, **kargs):
-		""" executes one callback function with hard timeout """
-		t = _EventSystem._Spawn_thread(target=handler, args=args, kw=kargs)
-		t.daemon = True
-		t.start()
-		t.join(self._timeout_secs)
-
-		if not t.is_alive():
-			if t.exc_info:
-				return t.exc_info
-			return t.result
-		else:
-			try:
-				msg = '[%s] Execution was forcefully terminated'
-				raise RuntimeError(msg % t.name)
-			except:
-				return sys.exc_info()
-
-	def _error(self, exc_info):
-		""" Retrieves the error info """
-		if self._exc_info:
-			if self._traceback:
-				return exc_info
-			return exc_info[:2]
-		return exc_info[1]
-
-
-	def getHandlerCount(self):
-		with self._hlock:
-			return len(self._handler_list)
-
-
-	def clear(self):
-		""" Discards all registered handlers """
-		with self._hlock:
-			self._handler_list = []
-
-
-	__iadd__ = handle
-	__isub__ = unhandle
-	__call__ = fire
-	__len__ = getHandlerCount
-
-	def __repr__(self):
-		""" developer representation of this object """
-		return u'_EventSystem(' + repr(self._handler_list) + u')'
-
-
-
-class SubscriptionAE(_EventSystem):
+class SubscriptionES(EventSystem):
 	''' mapping python callbacks to DMS events '''
 	# =>caller has to attach his callback functions to this object.
 	# (Factory for this object is in DMSClient.get_dp_subscription())
@@ -1418,7 +1278,7 @@ class SubscriptionAE(_EventSystem):
 	def __init__(self, msghandler, sub_response):
 		self._msghandler = msghandler
 		self.sub_response = sub_response  # original DMS response (instance of RespSub())
-		super(SubscriptionAE, self).__init__()
+		super(SubscriptionES, self).__init__()
 
 
 	def get_tag(self):
@@ -1457,113 +1317,8 @@ class SubscriptionAE(_EventSystem):
 
 	def __repr__(self):
 		""" developer representation of this object """
-		return u'SubscriptionAE(self.sub_response=' + repr(self.sub_response) + u')'
+		return u'SubscriptionES(self.sub_response=' + repr(self.sub_response) + u')'
 
-
-
-
-###### FIXME: thread/memory leakage when code is freezed with py2exe... Perhaps a bug in this code?!?!? =>build own Event.
-class _SubscriptionAE(axel.Event):
-	''' mapping python callbacks to DMS events '''
-	# extending "axel events" for events handling https://github.com/axel-events/axel
-	# =>caller has to attach his callback functions to this object.
-	# (Factory for this object is in DMSClient.get_dp_subscription())
-
-	def __init__(self, msghandler, sub_response):
-		self._msghandler = msghandler
-		self.sub_response = sub_response    # original DMS response (instance of RespSub())
-
-		# details about constructor of Event():
-		# https://github.com/axel-events/axel/blob/master/axel/axel.py
-		# (setting threads>=0 means synchronous execution of eventhandler,
-		#  this way we get success or failure data in thread _SubscriptionAE_Dispatcher
-		# details about traceback:
-		#  https://pythonhosted.org/axel/
-		#  https://docs.python.org/2/library/sys.html
-		# ==>currently we execute all callbacks synchronously in thread _SubscriptionAE_Dispatcher,
-		#    one event-firing is done when all of it's handlers are done.
-		super(SubscriptionAE, self).__init__(threads=3,
-		                                     exc_info=True,
-		                                     traceback=False)
-
-	def get_tag(self):
-		return self.sub_response[u'tag']
-
-	def update(self, **kwargs):
-		# FIXME for performance: detect changes in "query" and "event",
-		# if changed, then overwrite subscription in DMS,
-		# else resubscribe (currently we send request in every case...)
-		# FIXME: how to report errors to caller?
-
-		# reuse "path" and "tag", then DMS will replace subscription
-		assert not u'path' in kwargs, u'DMS uses path and tag for identifying subscription. Changing is not allowed!'
-		assert not u'tag' in kwargs, u'DMS uses path and tag for identifying subscription. Changing is not allowed!'
-		if u'path' in kwargs:
-			del(kwargs[u'path'])
-		kwargs[u'tag'] = self.sub_response[u'tag']
-		resp = self._msghandler.dp_sub(path=self.sub_response[u'path'], **kwargs)
-
-
-	def unsubscribe(self):
-		# FIXME: how to report errors to caller?
-		resp = self._msghandler._dp_unsub(path=self.sub_response[u'path'],
-		                                  tag=self.sub_response[u'tag'])
-		self._msghandler.del_subscription(self)
-
-
-	def _extract(self, item):
-		# overriding method in superclass:
-		# -forcing timeout on all our callbacks
-		# -disabling memoize permanently (callback functions of library user must be called on every event!)
-		""" Extracts a handler and handler's arguments that can be provided
-		as list or dictionary. If arguments are provided as list, they are
-		considered to have this sequence: (handler, memoize, timeout)
-		Examples:
-			event += handler
-			event += (handler, True, 1.5)
-			event += {'handler':handler, 'memoize':True, 'timeout':1.5}
-		"""
-		if not item:
-			raise ValueError('Invalid arguments')
-
-		handler = None
-		memoize = False
-		timeout = 0
-
-		if not isinstance(item, (list, tuple, dict)):
-			handler = item
-		elif isinstance(item, (list, tuple)):
-			if len(item) == 3:
-				handler, memoize, timeout = item
-			elif len(item) == 2:
-				handler, memoize = item
-			elif len(item) == 1:
-				handler = item
-		elif isinstance(item, dict):
-			handler = item.get('handler')
-			memoize = item.get('memoize', False)
-			timeout = item.get('timeout', 0)
-
-		# included as protection against infinite blocking in _SubscriptionAE_Dispatcher()
-		# =>set a timeout in every case
-		forced_timeout = max(0, min(float(timeout), CALLBACK_MAX_TIMEOUT))
-
-		# old original code:
-		#return handler, bool(memoize), float(timeout)
-		return handler, False, forced_timeout
-
-
-	def __del__(self):
-		# destructor: being friendly: unsubscribe from DMS for stopping events
-		try:
-			# on shutting down Python program this could raise an TypeError
-			self.unsubscribe()
-		except TypeError:
-			pass
-
-	def __repr__(self):
-		""" developer representation of this object """
-		return u'SubscriptionAE(self.sub_response=' + repr(self.sub_response) + u')'
 
 
 
@@ -1622,14 +1377,14 @@ class DMSEvent(_Mydict):
 
 
 class _MessageHandler(object):
-	def __init__(self, dmsclient_obj, whois_str, user_str, subAE_queue):
+	def __init__(self, dmsclient_obj, whois_str, user_str, subES_queue):
 		# backreference for sending messages
 		self._dmsclient = dmsclient_obj
 		self._whois_str = whois_str
 		self._user_str = user_str
 
-		# Queue for firing Subscription-axel.Events
-		self._subAE_queue = subAE_queue
+		# Queue for firing Subscription-EventSystem objects
+		self._subES_queue = subES_queue
 
 		# thread safety for shared dictionaries =>we want to be on the safe side!
 		# (documentation: https://docs.python.org/2/library/threading.html#lock-objects )
@@ -1642,11 +1397,11 @@ class _MessageHandler(object):
 		self._pending_response_lock = threading.Lock()
 
 
-		# dict for DMS-events (key: tag, value: SubscriptionAE-objects)
+		# dict for DMS-events (key: tag, value: SubscriptionES-objects)
 		# =>DMS-event will fire our python event
 		# (our chosen tag for DMS subscription command is unique across all events related to this subscription)
-		self._subscriptionAE_objs_dict = {}
-		self._subscriptionAE_objs_lock = threading.Lock()
+		self._subscriptionES_objs_dict = {}
+		self._subscriptionES_objs_lock = threading.Lock()
 
 
 		# object for assembling response lists
@@ -1872,24 +1627,20 @@ class _MessageHandler(object):
 				# trigger Python event
 				try:
 					event_obj = DMSEvent(**event)
-					with self._subscriptionAE_objs_lock:
-						subAE = self._subscriptionAE_objs_dict[event_obj.tag]
+					with self._subscriptionES_objs_lock:
+						subES = self._subscriptionES_objs_dict[event_obj.tag]
 
-					# via background thread: firing Python callback functions registered in axel.Event()
-					# (result is tuple of tuples: https://github.com/axel-events/axel/blob/master/axel/axel.py#L122 )
-					if len(subAE) > 0:
-						logger.debug('_MsgHandler.handle(): queueing event-firing on SubscriptionAE object [DMS-key="' + event_obj.path + '" / tag=' + event_obj.tag + ']...')
-						self._subAE_queue.put((subAE, event_obj))
+					# via background thread: firing Python callback functions registered in EventSystem object
+					# (result is list of tuples)
+					if len(subES) > 0:
+						logger.debug('_MsgHandler.handle(): queueing event-firing on SubscriptionES object [DMS-key="' + event_obj.path + '" / tag=' + event_obj.tag + ']...')
+						self._subES_queue.put((subES, event_obj))
 					else:
-						logger.info('_MsgHandler.handle(): SubscriptionsAE object is empty, suppressing firing of axel.Event...')
+						logger.info('_MsgHandler.handle(): SubscriptionsAE object is empty, suppressing firing of EventSystem object...')
 
 					# help garbage collector
-					# (FIXME: execution in PyCharm works, execution as freezed code with py2exe has thread and/or memory leakage... Why?!?)
-					for obj in [subAE, event_obj]:
-						try:
-							del (obj)
-						except NameError:
-							pass
+					event_obj = None
+					subES = None
 				except AttributeError:
 					logger.exception("exception in _MessageHandler.handle(): DMS-event seems corrupted")
 				except KeyError:
@@ -1923,12 +1674,12 @@ class _MessageHandler(object):
 			raise Exception('_MessageHandler.DMS_busy_wait_for_response(): got no response within ' + str(timeout) + ' seconds...')
 
 	def add_subscription(self, subAE):
-		with self._subscriptionAE_objs_lock:
-			self._subscriptionAE_objs_dict[subAE.get_tag()] = subAE
+		with self._subscriptionES_objs_lock:
+			self._subscriptionES_objs_dict[subAE.get_tag()] = subAE
 
 	def del_subscription(self, subAE):
-		with self._subscriptionAE_objs_lock:
-			del(self._subscriptionAE_objs_dict[subAE.get_tag()])
+		with self._subscriptionES_objs_lock:
+			del(self._subscriptionES_objs_dict[subAE.get_tag()])
 
 
 	def prepare_tag(self, curr_tag=None):
@@ -1946,77 +1697,72 @@ class _MessageHandler(object):
 
 
 
-class _SubscriptionAE_Dispatcher(threading.Thread):
-	""" firing Subscription-Axel.Events in a separated thread """
+class _SubscriptionES_Dispatcher(threading.Thread):
+	""" firing Subscription-EventSystem objects in a separated thread """
 	# =>if user adds an infinitly running function, then only the event-monitoring is blocked,
 	#   instead of blocking whole _MessageHandler.handle() function
 	# =>this way a users callback function should be able to send WebSocket messages
 	#   (ealier we had a deadlock sending a message while processing _cb_on_message() function)
-	# FIXME: should we implement a hard timeout when synchronous execution of a fired SubscriptionAE() with masses of handlers uses too much time?
+	# FIXME: should we implement a hard timeout when synchronous execution of a fired SubscriptionES() with masses of handlers uses too much time?
 	# FIXME: should we implement a priority queue for event handling?
-	# FIXME: should we fire SubscriptionAE() in parallel?
+	# FIXME: should we fire SubscriptionES() in parallel?
 	# FIXME: we use a "polling queue", it's a waste of CPU time when no datapoint subscription is active...
 
 	def __init__(self, event_q):
 		self._event_q = event_q
 		self.keep_running = True
-		super(_SubscriptionAE_Dispatcher, self).__init__()
+		super(_SubscriptionES_Dispatcher, self).__init__()
 
 		# helper variables for diagnostic warnings
-		self._time_secs_old = 0
-		self._time_secs_new = 0
 		self._do_warn_queuesize = True
 
 
 	def run(self):
 		# "polling queue" based on code from http://stupidpythonideas.blogspot.ch/2013/10/why-your-gui-app-freezes.html
-		logger.debug('_SubscriptionAE_Dispatcher.run(): background thread for firing axel.Events() is running...')
+		logger.debug('_SubscriptionES_Dispatcher.run(): background thread for firing EventSystem objects is running...')
 		while self.keep_running:
 			try:
-				subAE, event_obj = self._event_q.get(block=False)
+				subES, event_obj = self._event_q.get(block=False)
 			except queue.Empty:
 				# give other threads some CPU time...
 				time.sleep(SLEEP_TIMEBASE)
 			except Exception as ex:
-				logger.error('_SubscriptionAE_Dispatcher.run(): got exception ' + repr(ex))
+				logger.error('_SubscriptionES_Dispatcher.run(): got exception ' + repr(ex))
 			else:
 				# (this is an optional else clause when no exception occured)
-				logger.debug('_SubscriptionAE_Dispatcher.run(): event-firing on SubscriptionAE object [DMS-key="' + event_obj.path + '" / tag=' + event_obj.tag + ']')
-				self._time_secs_old = time.time()
-				result = subAE(event_obj)
-				self._time_secs_new = time.time()
+				logger.debug('_SubscriptionES_Dispatcher.run(): event-firing on SubscriptionES object [DMS-key="' + event_obj.path + '" / tag=' + event_obj.tag + ']')
+				result = subES(event_obj)
 
 				# FIXME: how to inform caller about exceptions while executing his callbacks? Currently we log them, no other information.
 				if result:
 					for idx, res in enumerate(result):
 						if res[0] == None:
-							logger.debug('_SubscriptionAE_Dispatcher.run(): event-firing on SubscriptionAE object: asynchronously started callback no.' + str(idx) + ': handler=' + repr(res[2]))
+							logger.debug('_SubscriptionES_Dispatcher.run(): event-firing on SubscriptionES object: asynchronously started callback no.' + str(idx) + ': handler=' + repr(res[2]))
 						else:
-							logger.debug('_SubscriptionAE_Dispatcher.run(): event-firing on SubscriptionAE object: synchronous callback no.' + str(idx) + ': success=' + str(res[0]) + ', result=' + str(res[1]) + ', handler=' + repr(res[2]))
+							logger.debug('_SubscriptionES_Dispatcher.run(): event-firing on SubscriptionES object: synchronous callback no.' + str(idx) + ': success=' + str(res[0]) + ', result=' + str(res[1]) + ', handler=' + repr(res[2]))
 
-						# since we process axel.Events synchronously (this could be a bottleneck or risk of blocking!!!) we get success or failure data
-						# =>look in constructor of SubscriptionAE() for details
+						# since we process EventSystem objects synchronously (this could be a bottleneck or risk of blocking!!!) we get success or failure data
+						# =>look in constructor of SubscriptionES() for details
 						if res[0] == False:
 							# example: res[1] without traceback: (<type 'exceptions.TypeError'>, TypeError("cannot concatenate 'str' and 'int' objects",))
 							#          =>when traceback=True, then ID of traceback object is added to the part above.
 							#            Assumption: traceback is not needed. It would be useful when debugging client code...
-							logger.error('_SubscriptionAE_Dispatcher.run(): event-firing on SubscriptionAE object: synchronous callback no.' + str(idx) + ' failed: ' + str(res[1]) + ' [handler=' + repr(res[2]) + ']')
+							logger.error('_SubscriptionES_Dispatcher.run(): event-firing on SubscriptionES object: synchronous callback no.' + str(idx) + ' failed: ' + str(res[1]) + ' [handler=' + repr(res[2]) + ']')
 				else:
-					logger.info('_SubscriptionAE_Dispatcher.run(): event-firing had no effect (all handlers of SubscriptionAE object were removed while waiting in event queue...) [DMS-key="' + event_obj.path + '" / tag=' + event_obj.tag + ']')
+					logger.info('_SubscriptionES_Dispatcher.run(): event-firing had no effect (all handlers of SubscriptionES object were removed while waiting in event queue...) [DMS-key="' + event_obj.path + '" / tag=' + event_obj.tag + ']')
 
 				# diagnostic values
-				duration_secs = self._time_secs_new - self._time_secs_old
-				if duration_secs > CALLBACK_DURATION_WARNLEVEL:
-					logger.warn('_SubscriptionAE_Dispatcher.run(): event-firing on SubscriptionAE object [DMS-key="' + event_obj.path + '" / tag=' + event_obj.tag + '] took ' + str(duration_secs) + ' seconds... =>you should shorten your callback functions!')
+				if subES.duration_secs > CALLBACK_DURATION_WARNLEVEL:
+					logger.warn('_SubscriptionES_Dispatcher.run(): event-firing on SubscriptionES object [DMS-key="' + event_obj.path + '" / tag=' + event_obj.tag + '] took ' + str(subES.duration_secs) + ' seconds... =>you should shorten your callback functions!')
 				if self._event_q.qsize() > EVENTQUEUE_WARNSIZE and self._do_warn_queuesize:
 					self._do_warn_queuesize = False
-					logger.warn('_SubscriptionAE_Dispatcher.run(): number of waiting events is over ' + str(EVENTQUEUE_WARNSIZE) + '... =>you should shorten your callback functions and unsubscribe BEFORE removing handlers of SubscriptionAE object!')
+					logger.warn('_SubscriptionES_Dispatcher.run(): number of waiting events is over ' + str(EVENTQUEUE_WARNSIZE) + '... =>you should shorten your callback functions and unsubscribe BEFORE removing handlers of SubscriptionES object!')
 				if self._event_q.qsize() < EVENTQUEUE_WARNSIZE:
 					self._do_warn_queuesize = True
 
 				# help garbage collector
 				# (FIXME: execution in PyCharm works, execution as freezed code with py2exe has thread and/or memory leakage... Why?!?)
-				for obj in [subAE, event_obj, result]:
+				for obj in [subES, event_obj, result]:
 					try:
 						del(obj)
 					except NameError:
@@ -2028,7 +1774,7 @@ class DMSClient(object):
 		self._dms_host_str = dms_host_str
 		self._dms_port_int = dms_port_int
 		self._subAE_queue = queue.Queue()
-		self._msghandler = _MessageHandler(dmsclient_obj=self, whois_str=whois_str, user_str=user_str, subAE_queue=self._subAE_queue)
+		self._msghandler = _MessageHandler(dmsclient_obj=self, whois_str=whois_str, user_str=user_str, subES_queue=self._subAE_queue)
 
 		# thread synchronisation flag for Websocket connection state
 		# (documentation: https://docs.python.org/2/library/threading.html#event-objects )
@@ -2050,8 +1796,8 @@ class DMSClient(object):
 		# FIXME: how to return caller a non-reachable WebSocket server?
 		logger.info("WebSocket connection will be established in background...")
 
-		# background thread for firing Subscription-axel.Events
-		self._subAE_disp_thread = _SubscriptionAE_Dispatcher(event_q=self._subAE_queue)
+		# background thread for firing Subscription-EventSystem objects
+		self._subES_disp_thread = _SubscriptionES_Dispatcher(event_q=self._subAE_queue)
 
 
 	# API
@@ -2079,7 +1825,7 @@ class DMSClient(object):
 			print('DEBUGGING: get_dp_subscription(): type(response)=' + repr(type(response)) + ', repr(response)=' + repr(response))
 		if response["code"] == u'ok':
 			# DMS accepted subscription
-			subAE = SubscriptionAE(msghandler=self._msghandler, sub_response=response)
+			subAE = SubscriptionES(msghandler=self._msghandler, sub_response=response)
 			self._msghandler.add_subscription(subAE=subAE)
 			return subAE
 		else:
@@ -2118,7 +1864,7 @@ class DMSClient(object):
 
 	def _cb_on_open(self, ws):
 		logger.info("DMSClient: websocket callback _on_open(): WebSocket connection is established.")
-		self._subAE_disp_thread.start()
+		self._subES_disp_thread.start()
 		self.ready_to_send.set()
 
 	def _cb_on_close(self, ws):
@@ -2140,7 +1886,7 @@ class DMSClient(object):
 
 	def _exit_subAE_thread(self):
 		logger.debug("DMSClient._exit_subAE_thread(): exiting subscriptionAE-dispatcher thread...")
-		self._subAE_disp_thread.keep_running = False
+		self._subES_disp_thread.keep_running = False
 
 	# trying to implement Context Manager.
 	# help from https://jeffknupp.com/blog/2016/03/07/python-with-context-managers/
@@ -2301,9 +2047,7 @@ if __name__ == '__main__':
 				#while True:
 				#	pass
 				time.sleep(CALLBACK_DURATION_WARNLEVEL + 2)
-			#sub += myfunc
-			# test of timeout
-			sub += {'handler': myfunc, 'memoize': False, 'timeout': CALLBACK_MAX_TIMEOUT + 2 }
+			sub += myfunc
 
 			def myfunc2(event):
 				# testing logging of exception in callback function: TypeError("cannot concatenate 'str' and 'int' objects",)
