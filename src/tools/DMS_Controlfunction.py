@@ -154,29 +154,40 @@ class DMSDatapoint_Var(DMSDatapoint):
 		if event.path == self.key_str:
 			with self._val_lock:
 				logger.debug('DMSDatapoint_Var._cb_changed_value(): callback for DMS key "' + self.key_str + '" was fired... [event.value=' + repr(event.value)+']')
-				self._value = event.value
-				self._datatype = event.type
 
 				# interpretation of current datapoint state
 				if event.code in (dms.DMSEvent.CODE_SET, dms.DMSEvent.CODE_CREATE):
-					self._is_available_cached = True
+					is_available = True
 				elif event.code is dms.DMSEvent.CODE_DELETE:
-					self._is_available_cached = False
+					is_available = False
 				else:
 					logger.error('internal error: DMSDatapoint_Var._cb_changed_value(): callback for DMS key "' + self.key_str + '" contains unexpected code "' + repr(event.code) + ', check subscribe().')
 
+				self._update_value(value=event.value,
+				                   datatype=event.type,
+				                   is_available=is_available)
 
-				# inform all Controlfunctions of changed value
-				# =>main thread will check this
-				# (in an older version this callback directly called evaluate(),
-				#  this leaded to deadlock in dmswebsocket:
-				#  executing _MessageHandler._send_message() in _MessageHandler.handle() while firing SubscriptionES() is not possible...)
-				for func_obj in self._curr_func_list:
-					func_obj.result_dirty.set()
 				logger.debug('DMSDatapoint_Var._cb_changed_value(): callback for DMS key "' + self.key_str + '" is done.')
 		else:
 			logger.error('DMSDatapoint_Var._cb_changed_value(): subscription error: callback for DMS key "' + self.key_str + '" was fired with event.path=' + event.path + '!')
 		event = None
+
+
+	def _update_value(self, value, datatype, is_available=True):
+		self._value = value
+		self._datatype = datatype
+		self._is_available_cached = is_available
+
+		logger.debug(
+			'DMSDatapoint_Var._update_value(): update for "' + self.key_str + '" [value=' + repr(value) + ', datatype=' + repr(datatype) + ']')
+
+		# inform all Controlfunctions of changed value
+		# =>main thread will check this
+		# (in an older version this callback directly called evaluate(),
+		#  this leaded to deadlock in dmswebsocket:
+		#  executing _MessageHandler._send_message() in _MessageHandler.handle() while firing SubscriptionES() is not possible...)
+		for func_obj in self._curr_func_list:
+			func_obj.result_dirty.set()
 
 
 	def subscribe(self):
@@ -188,6 +199,9 @@ class DMSDatapoint_Var(DMSDatapoint):
 			msg = self._sub_obj.sub_response.message
 			if not msg:
 				self._sub_obj += self._cb_changed_value
+				self._update_value(value=self._sub_obj.sub_response.value,
+				                   datatype=self._sub_obj.sub_response.type,
+				                   is_available=True)
 				logger.info('DMSDatapoint_Var.subscribe(): monitoring of DMS key "' + self.key_str + '" is ready.')
 			else:
 				logger.error('DMSDatapoint_Var.subscribe(): monitoring of DMS key "' + self.key_str + '" failed! [message: ' + msg + '])')
