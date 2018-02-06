@@ -142,7 +142,7 @@ class DMSDatapoint_Var(DMSDatapoint):
 		super(DMSDatapoint_Var, self).__init__(dms_ws, key_str)
 		# monitoring of a datapoint allows us to cache it's state
 		self._is_available_cached = False
-		self._val_lock = threading.Lock()
+		self._val_lock = threading.RLock()
 
 	def add_function(self, curr_func):
 		# backreference to function where this variable is used
@@ -174,12 +174,12 @@ class DMSDatapoint_Var(DMSDatapoint):
 
 
 	def _update_value(self, value, datatype, is_available=True):
-		self._value = value
-		self._datatype = datatype
-		self._is_available_cached = is_available
+		with self._val_lock:
+			self._value = value
+			self._datatype = datatype
+			self._is_available_cached = is_available
+			logger.debug('DMSDatapoint_Var._update_value(): update for "' + self.key_str + '" [value=' + repr(value) + ', datatype=' + repr(datatype) + ']')
 
-		logger.debug(
-			'DMSDatapoint_Var._update_value(): update for "' + self.key_str + '" [value=' + repr(value) + ', datatype=' + repr(datatype) + ']')
 
 		# inform all Controlfunctions of changed value
 		# =>main thread will check this
@@ -212,7 +212,8 @@ class DMSDatapoint_Var(DMSDatapoint):
 
 	def is_available(self):
 		# override of function in superclass: using cached datapoint state if possible
-		return self._is_available_cached or super(DMSDatapoint_Var, self).is_available()
+		with self._val_lock:
+			return self._is_available_cached or super(DMSDatapoint_Var, self).is_available()
 
 
 class Controlfunction(object):
