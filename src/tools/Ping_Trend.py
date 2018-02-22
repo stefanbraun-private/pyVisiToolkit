@@ -30,12 +30,12 @@ import time
 # (based on tutorial https://docs.python.org/2/howto/logging.html )
 # create logger =>set level to DEBUG if you want to catch all log messages!
 logger = logging.getLogger('tools.Ping_Trend')
-logger.setLevel(logging.DEBUG)
+logger.setLevel(logging.INFO)
 
 # create console handler
 # =>set level to DEBUG if you want to see everything on console!
 ch = logging.StreamHandler()
-ch.setLevel(logging.DEBUG)
+ch.setLevel(logging.INFO)
 
 # create formatter
 formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -97,6 +97,13 @@ class PingTarget(object):
 		self._thread = None
 		self._stdout_queue = Queue.Queue()
 
+		# counting response lines: we search only for success,
+		# so we have to prevent wrong statistics during start
+		self._nof_response_lines = -5
+		self._nof_success = 0
+		self._nof_fails = 0
+		self._collect_stats = False
+
 
 	def start_background_ping(self):
 		# with help from https://www.endpoint.com/blog/2015/01/28/getting-realtime-output-using-python
@@ -118,20 +125,41 @@ class PingTarget(object):
 				# no thread means no active process!
 				raise KilledProcessException()
 		else:
-			logger.debug('PingTarget.get_ping_rtt(): one line of stdout is ' + repr(line) + '[' + self.host + ']')
+			logger.debug('[' + self.host + '] PingTarget.get_ping_rtt(): stdout: ' + repr(line))
 			if line != '':
+				self._nof_response_lines += 1
+				self._collect_stats = self._nof_response_lines > 0
+
 				match = re.search(PingTarget.PATTERN_SUCCESS, line)
 				if match:
+					if self._collect_stats:
+						self._nof_success += 1
 					return int(match.group('millisecs'))
 				else:
+					if self._collect_stats:
+						self._nof_fails += 1
 					# assuming error => "-1" in trend should show an error
 					return -1
 			else:
 				return None
 
-
 	def stop_background_ping(self):
 		self._thread.stop()
+
+	def print_statistics(self):
+		# Ping shows it's own statistics... =>currently we count only success and collect own statistics.
+		logger.debug(' [' + self.host + '] PingTarget.print_statistics(): success=' + str(self._nof_success) + ', fails=' + str(self._nof_fails) + ', total lines=' + str(self._nof_response_lines))
+
+		# FIXME: do we need cleaning of statistics?
+		# (Ping shows own statistics when interrupted by CTRL+C, these are missinterpreted lines,
+		#  process-killing as we do doesn't show additional output.
+		if self._nof_response_lines > 0:
+			loss_percentage = 100.0 / self._nof_response_lines * self._nof_fails
+			logger.info('[' + self.host + '] PingTarget.print_statistics(): success=' + str(self._nof_success) + ', fails=' + str(
+				self._nof_fails) + ', packetloss=' + str(loss_percentage) + '%')
+		else:
+			logger.warn('[' + self.host + '] PingTarget.print_statistics(): nothing to show... (interrupted too early?)')
+
 
 
 class Runner(object):
@@ -170,7 +198,7 @@ class Runner(object):
 			try:
 				rtt = target.get_ping_rtt()
 				if rtt:
-					logger.debug('Runner.analyze_and_store(): Round Trip Time is ' + repr(rtt) + ' [target: ' + target.host + ']')
+					logger.debug('[' + target.host + '] Runner.analyze_and_store(): Round Trip Time is ' + repr(rtt))
 					resp = self._dms_ws.dp_set(path=target.dmskey,
 					                           value=rtt,
 					                           create=False)
@@ -183,6 +211,7 @@ class Runner(object):
 						# =>currently we retry it next cycle.
 			except KilledProcessException:
 				# subprocess is no more working...
+				target.print_statistics()
 				self._pingtargets.remove(target)
 
 	def get_nof_pingtargets(self):
@@ -192,6 +221,7 @@ class Runner(object):
 	def stop_pings(self):
 		logger.info('Runner.stop_pings(): stopping background ping for every target...')
 		for target in self._pingtargets:
+			target.print_statistics()
 			target.stop_background_ping()
 
 
@@ -214,12 +244,13 @@ def main(dms_server, dms_port, target_list, only_dryrun):
 			# help from http://stackoverflow.com/questions/13180941/how-to-kill-a-while-loop-with-a-keystroke
 			# and http://effbot.org/zone/stupid-exceptions-keyboardinterrupt.htm
 			try:
-				logger.info('"Ping_Trend" is starting work... Press <CTRL> + C for aborting.')
+				logger.info('"Ping_Trend" is working now... Press <CTRL> + C for aborting.')
 
 				keep_running = True
 				while keep_running:
 					# FIXME: we should implement a more efficient method...
 					runner.analyze_and_store()
+
 					keep_running = runner.get_nof_pingtargets() > 0
 					time.sleep(0.001)
 				logger.info('"Ping_Trend" has nothing to do...')
@@ -238,7 +269,10 @@ if __name__ == '__main__':
 	# help for commandline switches: https://stackoverflow.com/questions/8259001/python-argparse-command-line-flags-without-arguments
 	# help for appending list of targets: https://mkaz.tech/code/python-argparse-cookbook/
 
-	parser.add_argument('--target', '-t', action='append', dest='target', nargs=2, help='pair of target and DMS key, one or more times (example: -t 192.168.1.1 System:Ping_Trend:DefaultGW)')
+	# help for required arguments: https://stackoverflow.com/questions/24180527/argparse-required-arguments-listed-under-optional-arguments
+	requiredArg = parser.add_argument_group('required (ping target)')
+	requiredArg.add_argument('--target', '-t', action='append', dest='target', nargs=2, required=True, help='pair of target and DMS key, one or more times (example: -t 192.168.1.1 System:Ping_Trend:DefaultGW)')
+
 	parser.add_argument('--dryrun', '-d', action='store_true', dest='only_dryrun', default=False, help='no write into DMS, only print result (default: False)')
 	parser.add_argument('--dms_servername', '-s', dest='dms_server', default='localhost', type=str, help='hostname or IP address for DMS JSON Data Exchange (default: localhost)')
 	parser.add_argument('--dms_port', '-p', dest='dms_port', default=9020, type=int, help='TCP port for DMS JSON Data Exchange (default: 9020)')
