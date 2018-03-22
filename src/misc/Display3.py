@@ -4,6 +4,12 @@
 misc.Display3.py      v0.0.1
 Driver for a Display in GE (Grafikeditor)
 
+using ASCII-art: every row is a textfield containing one character per pixel,
+text is stored in STR datapoint in DMS
+=>ressource friendly, faster than display2: needs only 100 DMS write operations for a 100x100 pixel display...
+=>current implementation: only black and white per pixel
+
+
 Copyright (C) 2018 Stefan Braun
 
 This program is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, either version 2 of the License, or (at your option) any later version.
@@ -26,7 +32,7 @@ import time
 # setup of logging
 # (based on tutorial https://docs.python.org/2/howto/logging.html )
 # create logger =>set level to DEBUG if you want to catch all log messages!
-logger = logging.getLogger('misc.Display2')
+logger = logging.getLogger('misc.Display3')
 logger.setLevel(logging.DEBUG)
 
 # create console handler
@@ -56,7 +62,7 @@ class Display(object):
 	# https://www.hackerearth.com/practice/notes/beautiful-python-a-simple-ascii-art-generator-from-images/
 	# https://gist.github.com/cdiener/10567484
 	#
-	PIXEL_ON = "*"
+	PIXEL_ON = "@"
 	PIXEL_OFF = " "
 
 	def __init__(self, dms_ws):

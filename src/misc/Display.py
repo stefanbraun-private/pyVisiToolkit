@@ -4,6 +4,11 @@
 misc.Display.py      v0.0.1
 Driver for a Display in GE (Grafikeditor)
 
+one PSC-rectangle object per pixel,
+it's visibility is controlled by a BIT datapoint in DMS
+=>ressource hogging and very slow: needs 10'000 DMS write operations for a 100x100 pixel display...
+
+
 Copyright (C) 2018 Stefan Braun
 
 This program is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, either version 2 of the License, or (at your option) any later version.
