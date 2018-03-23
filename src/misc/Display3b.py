@@ -143,7 +143,7 @@ class Display(object):
 		for y in range(Display.SCREEN_HEIGHT):
 			# indexing/slicing in numpy arrays: help from https://www.tutorialspoint.com/numpy/numpy_indexing_and_slicing.htm
 			one_row = self._buffer[y, ...]
-			if max(one_row) > 0:
+			if min(one_row) < 255:
 				self._buffer[y, ...] = np.array((255), dtype='uint8')
 				self._dirty_rows[y] = True
 		self.update()
