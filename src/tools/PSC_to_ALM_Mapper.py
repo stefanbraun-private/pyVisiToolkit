@@ -151,7 +151,10 @@ class PSC_Analyzer(object):
 		for entry in os.listdir(path):
 			fullpath = os.path.join(path, entry)
 			if os.path.isfile(fullpath):
-				if entry.split(os.extsep)[-1].upper() == u'PSC' and entry.startswith('_'):
+				# ignoring BMOs (assumption: PSC-files starting with "_" or a digit aren't BMOs)
+				pattern = r'^[_\d].*\.PSC'
+				m = re.search(pattern, entry, re.IGNORECASE)
+				if m:
 					yield fullpath
 			# FIXME: should we recursively tracerse subdirectories? Perhaps this would work:
 				# elif os.path.isdir(fullpath):
