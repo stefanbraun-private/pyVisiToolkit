@@ -128,18 +128,20 @@ class PSC_Analyzer(object):
 
 				# help with regex: https://stackoverflow.com/questions/6018340/capturing-group-with-findall
 				# =>we search only for one group, so we get a list of strings and not a list of tuples containing matched groups
-				pattern = re.compile(r'LIB;[\w\s]+\.plb;\w+;([\w:]+);BMO:.+')
-				for bmo_inst in pattern.findall(psc_content):
-					#logger.debug('PSC_Analyzer.analyze(): found BMO instance "' + bmo_inst + '")')
+				patterns = [re.compile(r'LIB;[\w\s]+\.plb;\w+;([\w:]+);BMO:.+'),                    # BMO instances
+				            re.compile(r'IBW;[\w\s]+\.*\w*;\d+;\d+;\d+;\d+;BMO[\w:]+;([\w:]+);')]   # button with reinit
+				for pattern in patterns:
+					for bmo_inst in pattern.findall(psc_content):
+						#logger.debug('PSC_Analyzer.analyze(): found BMO instance "' + bmo_inst + '")')
 
-					# add current PSC file as possible target for ALM "Screen" of this BMO instance
-					if not bmo_inst in self._bmo_instances_dict:
-						self._bmo_instances_dict[bmo_inst] = []
-					if not fullpath in self._bmo_instances_dict[bmo_inst]:
-						self._bmo_instances_dict[bmo_inst].append(fullpath)
+						# add current PSC file as possible target for ALM "Screen" of this BMO instance
+						if not bmo_inst in self._bmo_instances_dict:
+							self._bmo_instances_dict[bmo_inst] = []
+						if not fullpath in self._bmo_instances_dict[bmo_inst]:
+							self._bmo_instances_dict[bmo_inst].append(fullpath)
 
-					# update DMS path statistics of current PSC file
-					self._psc_dms_keystats[fullpath].update_statistic(bmo_inst)
+						# update DMS path statistics of current PSC file
+						self._psc_dms_keystats[fullpath].update_statistic(bmo_inst)
 
 				logger.debug('PSC_Analyzer.analyze(): found ' + str(len(self._bmo_instances_dict[bmo_inst])) + ' BMO instances.')
 		logger.info('PSC_Analyzer.analyze(): found total ' + str(len(self._bmo_instances_dict)) + ' BMO instances in ' + str(nof_files) + ' PSC files.')
@@ -185,19 +187,20 @@ class PSC_Analyzer(object):
 					# and idea from https://stackoverflow.com/questions/5212870/sorting-a-python-list-by-two-criteria
 
 					# sort priority:
-					# 1) "Logik" files to the end
+					# 1) use "Logik" files only if BMO instance has no other appearance
 					# 2) keyscore algorithm in DMS_keystats for similarity
-					#
+
 					isLogik = '_LG' in fullpath or '_LOGIK' in fullpath.upper()
 					keyscore = self._psc_dms_keystats[fullpath].get_keyscore(dmskey=bmo_instance)
 					return (not isLogik, keyscore)
 
+				# choose PSC image with highest rating (at the end of sorted list)
 				psc_list = sorted(psc_list, key=_sorting_key_function)
-				return psc_list[0]
+				return psc_list[-1]
 
 		except KeyError as ex:
-			logger.error('PSC_Analyzer.get_psc_filename(): BMO instance "' + bmo_instance + '" was not found on any PSC file!')
-			raise ex
+			logger.error('PSC_Analyzer.get_psc_filename(): ignoring BMO instance "' + bmo_instance + '", it was not found on any PSC file!')
+			return ""
 
 	def get_PSC_path(self):
 		return self._psc_path
@@ -216,6 +219,7 @@ class ALM_datapoint(object):
 
 	def collect(self):
 		self._collect_ALM()
+		self._collect_Screen()
 
 		# retrieve all OBJECT datapoints and match against ALM datapoints
 		responses = self._dms_ws.dp_get(path='',
@@ -263,8 +267,16 @@ class ALM_datapoint(object):
 		for alm_dp, bmo_instance in self.generator_ALM_BMO_instance():
 			total_alm += 1
 			# dictionary access with default value: http://www.tutorialspoint.com/python/dictionary_get.htm
+			# empty string means no PSC file referenced...
+			# =>assumption: every BMO instance needs a representation on a PSC file,
+			#               user will fix errors,
+			#               we insert "ALM:Screen" in every case.
 			curr_screen = self._alm_screen_dict.get(alm_dp, "")
-			new_screen = psc_analyzer.get_psc_filename(bmo_instance)
+
+			# get PSC filename from PSC fullpath
+			# FIXME: assumption: we don't use subdirectories... should we care? how does GE search for a PSC file?
+			psc_fullpath = psc_analyzer.get_psc_filename(bmo_instance)
+			new_screen = os.path.basename(psc_fullpath)
 			if curr_screen != new_screen:
 				unwritten_screens_dict[alm_dp] = new_screen
 
@@ -272,19 +284,17 @@ class ALM_datapoint(object):
 		logger.info('ALM_datapoint.write_ALM_screen(): number of current ALM screen mappings: ' + str(len(self._alm_screen_dict)))
 		logger.info('ALM_datapoint.write_ALM_screen(): number of changed ALM screen mappings: ' + str(len(unwritten_screens_dict)))
 
-		if len(unwritten_screens_dict):
-			if only_dryrun:
-				logger.info('ALM_datapoint.write_ALM_screen(): only dryrun. =>no change in DMS...')
-			else:
+		if only_dryrun:
+			logger.info('ALM_datapoint.write_ALM_screen(): only dryrun. =>no change in DMS...')
+		else:
+			if len(unwritten_screens_dict):
 				logger.info('ALM_datapoint.write_ALM_screen(): =>write screen-mappings into DMS...')
 				# iteration over dictionary: https://stackoverflow.com/questions/26660654/how-do-i-print-the-key-value-pairs-of-a-dictionary-in-python
 				for alm, screen in unwritten_screens_dict.iteritems():
-					# get PSC filename from PSC fullpath
-					# FIXME: assumption: we don't use subdirectories... should we care? how does GE search for a PSC file?
-					self._write_ALM_screen(alm_dp=alm, psc_filename=os.path.basename(screen))
+					self._write_ALM_screen(alm_dp=alm, psc_filename=screen)
 				logger.info('ALM_datapoint.write_ALM_screen(): done. :-)')
-		else:
-			logger.info('ALM_datapoint.write_ALM_screen(): =>nothing to do...')
+			else:
+				logger.info('ALM_datapoint.write_ALM_screen(): =>nothing to do...')
 
 
 	def _write_ALM_screen(self, alm_dp, psc_filename):
