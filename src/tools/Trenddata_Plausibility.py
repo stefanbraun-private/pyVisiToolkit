@@ -25,6 +25,7 @@ import collections
 import misc.timezone as timezone
 import numpy as np
 import matplotlib.pyplot as plt
+import pandas as pd
 import subprocess
 import threading
 import Queue
@@ -56,7 +57,7 @@ logger.addHandler(ch)
 ROOTWINDOW_TITLE = u'Trenddata Plausibility v0.0.1'
 
 
-class MyGUI(Tkinter.Tk):
+class Param_Frame(Tkinter.Frame):
 
 	# interval texts and timedelta: we need always same sorting...
 	INTERVALS = collections.OrderedDict()
@@ -74,7 +75,176 @@ class MyGUI(Tkinter.Tk):
 	RESOLUTIONS['12h'] = datetime.timedelta(hours=12)
 	RESOLUTIONS['24h'] = datetime.timedelta(days=1)
 
-	PATH = "MSR01:Ala101:Output_Lampe"
+
+
+	def __init__(self, parent):
+		self._parent = parent
+		Tkinter.Frame.__init__(self, master=parent, borderwidth=1, relief=Tkinter.SUNKEN)
+
+		self._interval = None
+		self._resolution = None
+
+		self._interval_var = Tkinter.StringVar()
+		self._interval_var.set('year')  # default
+
+		self._nof_rows_var = Tkinter.IntVar()
+		self._nof_rows_var.set(2)   # default
+
+		self._resolution_var = Tkinter.StringVar()
+		self._resolution_var.set('24h')  # default
+
+
+		self._draw_gui()
+
+	def _draw_gui(self):
+		# optionmenu: example from http://effbot.org/tkinterbook/optionmenu.htm
+		# "apply" seems deprecated... https://stackoverflow.com/questions/26744366/adding-command-to-a-tkinter-optionmenu
+		options = Param_Frame.INTERVALS.keys()
+		self._optmenu_intervals = Tkinter.OptionMenu(self, self._interval_var, *options, command=self._cb_optmenu_interval)
+
+		self._optmenu_rows = Tkinter.OptionMenu(self, self._nof_rows_var, *range(1, 11))
+
+		options = Param_Frame.RESOLUTIONS.keys()
+		self._optmenu_resolution = Tkinter.OptionMenu(self, self._resolution_var, *options, command=self._cb_optmenu_resolution)
+
+		Tkinter.Label(master=self, text='general parameters').grid(row=0, column=0, columnspan=2)
+
+
+		Tkinter.Label(master=self, text='interval').grid(row=2, column=0)
+		self._optmenu_intervals.grid(row=1, column=1)
+
+		Tkinter.Label(master=self, text='number of rows').grid(row=3, column=0)
+		self._optmenu_rows.grid(row=2, column=1)
+
+		Tkinter.Label(master=self, text='resolution').grid(row=1, column=0)
+		self._optmenu_resolution.grid(row=3, column=1)
+
+
+	def _cb_optmenu_interval(self, *args):
+		self._interval = Param_Frame.INTERVALS[args[0]]
+
+	def _cb_optmenu_resolution(self, *args):
+		self._resolution = Param_Frame.RESOLUTIONS[args[0]]
+
+
+	def get_interval(self):
+		# executing callback manually if needed
+		if not self._interval:
+			self._cb_optmenu_interval(self._interval_var.get())
+		return self._interval
+
+	def get_nof_rows(self):
+		return self._nof_rows_var.get()
+
+	def get_resolution(self):
+		# executing callback manually if needed
+		if not self._resolution:
+			self._cb_optmenu_resolution(self._resolution_var.get())
+		return self._resolution
+
+
+class Interpretation(Tkinter.Frame):
+	def __init__(self, parent, histData):
+		self._parent = parent
+		self._histData = histData
+		self._histData_ts = None      # pandas timeseries
+		Tkinter.Frame.__init__(self, master=parent, borderwidth=1, relief=Tkinter.SUNKEN)
+
+		Tkinter.Label(master=self, text="show diagram").grid(row=0, column=0, columnspan=3)
+
+		Tkinter.Button(master=self, text='line', command=self._cb_btn_line).grid(row=1, column=0)
+		Tkinter.Button(master=self, text='heatmap', command=self._cb_btn_heatmap).grid(row=1, column=1)
+		Tkinter.Button(master=self, text='histogram', command=self._cb_btn_histogram).grid(row=1, column=2)
+
+
+	def _cb_btn_line(self):
+		logger.debug('Interpretation._cb_btn_line()')
+
+	def _cb_btn_heatmap(self):
+		logger.debug('Interpretation._cb_btn_heatmap()')
+
+	def _cb_btn_histogram(self):
+		logger.debug('Interpretation._cb_btn_histogram()')
+
+
+class InterprDigital(Interpretation):
+	def __init__(self, *args, **kwargs):
+		Interpretation.__init__(self, *args, **kwargs)
+
+
+class InterprDigitalFrequency(InterprDigital):
+	def __init__(self, *args, **kwargs):
+		InterprDigital.__init__(self, *args, **kwargs)
+
+class InterprDigitalDutycycle(InterprDigital):
+	def __init__(self, *args, **kwargs):
+		InterprDigital.__init__(self, *args, **kwargs)
+
+
+class InterprAnalog(Interpretation):
+	def __init__(self, *args, **kwargs):
+		Interpretation.__init__(self, *args, **kwargs)
+
+class InterprAnalogAbsolut(InterprAnalog):
+	def __init__(self, *args, **kwargs):
+		InterprAnalog.__init__(self, *args, **kwargs)
+
+class InterprAnalogChange(InterprAnalog):
+	def __init__(self, *args, **kwargs):
+		InterprAnalog.__init__(self, *args, **kwargs)
+
+
+class ChooseInterpretation(Tkinter.Frame):
+	def __init__(self, parent, datatype):
+		self._parent = parent
+		self._datatype = datatype
+		Tkinter.Frame.__init__(self, master=parent, borderwidth=1, relief=Tkinter.SUNKEN)
+
+		self._radiobtn_var = Tkinter.IntVar()
+		self._radiobtn_var.set(-1)  # default: none of the radiobuttons is selected
+		self._radiobtn_var.trace("w", self._cb_radiobtn_changed)
+
+		# used in factory of interpretation instances
+		# (index is radiobutton value)
+		self._interpr_class_list = []
+
+		if self._datatype == 'bool':
+			rbtn = Tkinter.Radiobutton(master=self, text="frequency", variable=self._radiobtn_var, value=0)
+			rbtn.grid(row=1, column=0)
+			self._interpr_class_list.append(InterprDigitalFrequency)
+
+			rbtn = Tkinter.Radiobutton(master=self, text="duty cycle", variable=self._radiobtn_var, value=1)
+			rbtn.grid(row=1, column=1)
+			self._interpr_class_list.append(InterprDigitalDutycycle)
+		else:
+			rbtn = Tkinter.Radiobutton(master=self, text="absolut", variable=self._radiobtn_var, value=0)
+			rbtn.grid(row=1, column=0)
+			self._interpr_class_list.append(InterprAnalogAbsolut)
+
+			rbtn = Tkinter.Radiobutton(master=self, text="change", variable=self._radiobtn_var, value=1)
+			rbtn.grid(row=1, column=1)
+			self._interpr_class_list.append(InterprAnalogChange)
+
+
+	def _cb_radiobtn_changed(self, *args):
+		histData = self._parent.get_histdata()
+		idx = self._radiobtn_var.get()
+		obj = self._interpr_class_list[idx](parent=self._parent, histData=histData)
+		self._parent.add_diabutton_frame(obj)
+
+
+
+class MyGUI(Tkinter.Tk):
+
+	# Testproject
+	#PATH = "MSR01:Ala101:Output_Lampe"
+
+	# analogue
+	PATH = "MSR01_A:Allg:Aussentemp:Istwert"
+
+	# digital
+	#PATH = "MSR01_C:H07:LG_FunUeb_ErZae:EingangsSig:Input"
+
 
 	def __init__(self, curr_DMS):
 		Tkinter.Tk.__init__(self)
@@ -83,64 +253,50 @@ class MyGUI(Tkinter.Tk):
 
 		self._curr_DMS = curr_DMS
 		self._datatype = None
-		self._histDataArr = None
-		self._timedelta = None
-		self._resolution = None
-		self._interval = None
+
 		self._curr_tz = timezone.Timezone().get_tz()
 
-		self._resolution_var = Tkinter.StringVar()
-		self._resolution_var.set('24h')  # default
-
-		self._interval_var = Tkinter.StringVar()
-		self._interval_var.set('year')  # default
-
-		self._nof_rows_var = Tkinter.IntVar()
-		self._nof_rows_var.set(2)   # default
 
 
-		self._btn_grab_data = Tkinter.Button(master=self,
+		Tkinter.Label(master=self, text="datapoint: " + MyGUI.PATH).grid(row=0, column=0, columnspan=2)
+
+		self._radiobtn_alldata_var = Tkinter.BooleanVar()
+		self._radiobtn_alldata_var.set(False)  # default
+
+		rbtn0 = Tkinter.Radiobutton(master=self, text="preview", variable=self._radiobtn_alldata_var, value=False)
+		rbtn0.grid(row=1, column=0)
+
+		rbtn1 = Tkinter.Radiobutton(master=self, text="all trenddata", variable=self._radiobtn_alldata_var, value=True)
+		rbtn1.grid(row=1, column=1)
+
+		self._param_frame = Param_Frame(parent=self)
+		self._param_frame.grid(row=3, column=0, columnspan=2)
+
+		btn_grab_data = Tkinter.Button(master=self,
 		                                   text='grab trenddata',
 		                                     command=self._cb_btn_grab_data)
-
-		# optionmenu: example from http://effbot.org/tkinterbook/optionmenu.htm
-		# "apply" seems deprecated... https://stackoverflow.com/questions/26744366/adding-command-to-a-tkinter-optionmenu
-		options = MyGUI.RESOLUTIONS.keys()
-		self._optmenu_resolutions = Tkinter.OptionMenu(self, self._resolution_var, *options, command=self._cb_optmenu_resolution)
-		options = MyGUI.INTERVALS.keys()
-		self._optmenu_intervals = Tkinter.OptionMenu(self, self._interval_var, *options, command=self._cb_optmenu_interval)
-
-		self._optmenu_rows = Tkinter.OptionMenu(self, self._nof_rows_var, *range(1, 11))
-
-		Tkinter.Label(master=self, text='Heatmap').grid(row=0, column=0, columnspan=2)
-
-		Tkinter.Label(master=self, text='Heatmap resolution').grid(row=1, column=0)
-		self._optmenu_resolutions.grid(row=1, column=1)
-
-		Tkinter.Label(master=self, text='Heatmap interval').grid(row=2, column=0)
-		self._optmenu_intervals.grid(row=2, column=1)
-
-		Tkinter.Label(master=self, text='number of rows').grid(row=3, column=0)
-		self._optmenu_rows.grid(row=3, column=1)
-
-		self._btn_grab_data.grid(row=4, column=0, columnspan=2)
+		btn_grab_data.grid(row=4, column=0, columnspan=2)
 
 
-	def _cb_optmenu_resolution(self, *args):
-		self._resolution = MyGUI.RESOLUTIONS[args[0]]
+		self._choose_interpr_frame = None
 
-	def _cb_optmenu_interval(self, *args):
-		self._interval = MyGUI.INTERVALS[args[0]]
+		self._diabutton_frame = None
+
+
+	def add_diabutton_frame(self, frame):
+		if frame:
+			self._diabutton_frame = frame
+			self._diabutton_frame.grid(row=6, column=0, columnspan=2)
+		else:
+			self._diabutton_frame = None
+
+	def get_histdata(self):
+		return self._histData
+
 
 	def _cb_btn_grab_data(self):
 		try:
-			# executing callbacks manually if needed
-			if not self._resolution:
-				self._cb_optmenu_resolution(self._resolution_var.get())
-			if not self._interval:
-				self._cb_optmenu_interval(self._interval_var.get())
 
-			#
 			resp = self._curr_DMS.dp_get(path=MyGUI.PATH,
 			                             query=dms.Query(hasHistData=True))
 			try:
@@ -148,7 +304,7 @@ class MyGUI(Tkinter.Tk):
 				if one_resp.code == 'ok':
 					self._datatype = one_resp.type
 				else:
-					logger.error('MyGUI._cb_btn_grab_data(): ERROR:' + one_resp.message)
+					logger.error('MyGUI._cb_btn_grab_data(): ERROR from DMS: ' + one_resp.message)
 			except IndexError:
 				logger.error('MyGUI._cb_btn_grab_data(): ERROR: datapoint "' + MyGUI.PATH + '" is not available or has no trending!')
 				return
@@ -158,77 +314,83 @@ class MyGUI(Tkinter.Tk):
 				# workaround: when second and millisecond is not null in HistData, then DMS doesn't handle "end"...
 				now_dt = datetime.datetime.now(tz=self._curr_tz).replace(second=0, microsecond=0)
 
-				if self._datatype == "bool":
-					# boolean values: asking for EVERY trenddata point
-					interv = 0
+
+				if self._radiobtn_alldata_var.get():
+					# alldata mode: retrieve all trenddata
+					histData_interval = 0
 				else:
-					# other datatypes: asking for INTERPOLATED trenddata
-					interv = self._resolution.days * 3600 * 24 + self._resolution.seconds
-				histDataObj = dms.HistData(start=now_dt - self._nof_rows_var.get() * self._interval,
+					# preview mode: retrieve only minimum trenddata
+					resolution_td = self._param_frame.get_resolution()
+					histData_interval = resolution_td.days * 3600 * 24 + resolution_td.seconds
+
+				histDataObj = dms.HistData(start=now_dt - self._param_frame.get_nof_rows() * self._param_frame.get_interval(),
 				                           end=now_dt,
 				                           format="detail",
-				                           interval=interv
+				                           interval=histData_interval
 				                           )
-				logger.debug('MyGUI._cb_btn_grab_data(): histDataObj=' + repr(histDataObj))
+				#logger.debug('MyGUI._cb_btn_grab_data(): histDataObj=' + repr(histDataObj))
 				resp = self._curr_DMS.dp_get(path=MyGUI.PATH,
 				                             histData=histDataObj,
 				                             showExtInfos=dms.INFO_ALL
 				                             )
 				one_resp = resp[0]
 				if one_resp.code == 'ok':
-					self._histDataArr = one_resp.histData
+					self._histData = one_resp.histData
+
+					# update GUI
+					self._choose_interpr_frame = ChooseInterpretation(parent=self, datatype=one_resp.type)
+					self._choose_interpr_frame.grid(row=5, column=0, columnspan=2)
+
+					# FIXME!!!
+					#self._btn_frame = self._get_buttons_frame()
+					#self._btn_frame.grid(row=5, column=0, columnspan=2)
+
+					## short demonstration
+					#plt.figure()
+					#self._histData_ts.plot()
+					## help from https://stackoverflow.com/questions/16522380/matplotlib-plot-is-a-no-show
+					#plt.show()
+
 				else:
 					logger.error('MyGUI._cb_btn_grab_data(): ERROR: ' + one_resp.message)
+
+					# update GUI
+					self._choose_interpr_frame = None
 			else:
-				logger.error('MyGUI._cb_btn_grab_data(): ERROR: datapoint has unexpected datatype ' + self._datatype)
+				logger.error('MyGUI._cb_btn_grab_data(): ERROR: datapoint has unexpected datatype ' + str(self._datatype))
 		except Exception as ex:
 			logger.exception(ex)
 
 
-	def _update_buttons(self):
-		btn_frame = Tkinter.Frame(master=self)
-
-		btn_frequency = Tkinter.Button(master=btn_frame, text="show frequency")
-		btn_frequency.grid(row=1, column=0)
+	def _get_nof_rows(self):
+		return self._param_frame.get_nof_rows()
 
 
+	def _histData_as_timeseries(self, histdata):
+		if histdata:
+			nof_histData = len(histdata)
+			logger.debug('MyGUI._histData_as_timeseries(): number of histData objects: ' + str(nof_histData))
 
-		if self._datatype == "bool":
-			# frequency, ontime
-			pass
+			# based on example from https://pandas-docs.github.io/pandas-docs-travis/timeseries.html
+			# (iteratively appending to a pandas Series is not recommended!)
+			#  read https://pandas.pydata.org/pandas-docs/stable/generated/pandas.Series.append.html
+			# and usage hint from https://stackoverflow.com/questions/10839701/time-weighted-average-with-pandas/10856106#10856106
+			tstamps = []
+			states = []
+			values = []
+			recs = []
+			for item in histdata:
+				tstamps.append(pd.Timestamp(item['stamp']))
+				states.append(item['state'])
+				values.append(item['value'])
+				recs.append(item['rec'])
+			return pd.Series(data={'value': values, 'state': states, 'rec': recs}, index=tstamps)
 		else:
-			# lines, heatmap, histogram
-			pass
+			return None
 
-	def _foo(self):
-		# FIXME!!!
-		nof_histData = len(one_resp.histData)
-		logger.debug('MyGUI._cb_btn_grab_data(): number of histData objects: ' + str(nof_histData))
-		if nof_histData:
-			nof_rows = self._nof_rows_var.get()
-			interval_secs = self._interval.days * 3600 * 24 + self._interval.seconds
-			resolution_secs = self._resolution.days * 3600 * 24 + self._resolution.seconds
-			nof_columns = interval_secs / resolution_secs
 
-			## empty array: https://docs.scipy.org/doc/numpy/reference/generated/numpy.zeros.html#numpy.zeros
-			#missing_points = np.zeros(shape=nof_rows * nof_columns - nof_histData)
 
-			# filling array: https://docs.scipy.org/doc/numpy/reference/generated/numpy.fromiter.html
-			iterable = (item['value'] for item in one_resp.histData)
-			a = np.fromiter(iterable, np.float)
 
-			# resizing (missing values get zeros): https://docs.scipy.org/doc/numpy-1.13.0/reference/generated/numpy.resize.html
-			a = np.resize(a, nof_rows * nof_columns)
-
-			# reshape: https://docs.scipy.org/doc/numpy/reference/generated/numpy.reshape.html
-			a = np.reshape(a, (nof_rows, nof_columns))
-
-			logger.debug('MyGUI._cb_btn_grab_data(): numpy array a=' + repr(a))
-
-			# FIXME: embedding plot into Tkinter
-			# https://stackoverflow.com/questions/33282368/plotting-a-2d-heatmap-with-matplotlib
-			plt.imshow(a, cmap='hot', interpolation='nearest')
-			plt.show()
 
 
 def main(dms_server, dms_port):
