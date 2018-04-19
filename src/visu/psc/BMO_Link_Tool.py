@@ -21,10 +21,9 @@ You should have received a copy of the GNU General Public License along with thi
 import dms.dmswebsocket as dms
 import logging
 import argparse
-import Tkinter, Tkconstants, tkFileDialog
+import Tkinter, Tkconstants, ttk
 from visu.psc import Parser
 import os
-import ttk
 import datetime
 import collections
 import misc.timezone as timezone
@@ -33,7 +32,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import subprocess
 import threading
-import Queue
+import queue
 import shlex
 import re
 import time
@@ -112,7 +111,7 @@ class BMO_Elements_Handler(object):
 				yield elem, bmo_instance, bmo_class
 
 
-	def draw_elements(self, canvas_visu):
+	def draw_elements(self, canvas_visu, bmo_check_func):
 		self._bmo_instances = {}
 
 		# collect information for draw this element
@@ -134,17 +133,25 @@ class BMO_Elements_Handler(object):
 			self._bmo_instances[instance].set_BMO_class(bmo_class)
 
 		# draw this list on main canvas
-		for key, curr_instance in self._bmo_instances.items():
-			logger.debug('draw_elements(): BMO instance "' + key + '" [' + self._bmo_instances[key].get_BMO_class() + '] has maximum coordinates ' + repr(curr_instance.get_max_coords()))
-			canvas_visu.create_rectangle(*curr_instance.get_max_coords(), fill="white", outline="blue")
+		for instance, metadata in self._bmo_instances.items():
+			logger.debug('draw_elements(): BMO instance "' + instance + '" [' + self._bmo_instances[instance].get_BMO_class() + '] has maximum coordinates ' + repr(metadata.get_max_coords()))
+			if bmo_check_func(instance):
+				# BMO instance does exist
+				fillcolor = "green"
+				tags = (MyGUI.BMO_EXISTS_TAG, instance)
+			else:
+				fillcolor = "red"
+				tags = (MyGUI.BMO_MISSING_TAG, instance)
+			# hint about using tags: http://effbot.org/tkinterbook/canvas.htm#item-specifiers
+			canvas_visu.create_rectangle(*metadata.get_max_coords(), fill=fillcolor, outline="blue", tags=tags)
 
 			# add text into rectangle
 			# help from https://stackoverflow.com/questions/39087139/tkinter-label-text-in-canvas-rectangle-python
 			# calculate center:
-			x1, y1, x2, y2 = curr_instance.get_max_coords()
+			x1, y1, x2, y2 = metadata.get_max_coords()
 			x = (x1 + x2) / 2
 			y = (y1 + y2) / 2
-			canvas_visu.create_text((x, y), text=self._bmo_instances[key].get_BMO_class())
+			canvas_visu.create_text((x, y), text=self._bmo_instances[instance].get_BMO_class())
 
 
 
@@ -152,6 +159,9 @@ class MyGUI(Tkinter.Frame):
 	# example code from http://zetcode.com/gui/tkinter/layout/
 
 	ROOT_TITLE = u'BMO Link Tool v0.0.1'
+
+	BMO_EXISTS_TAG = 'BMO_EXISTS'
+	BMO_MISSING_TAG = 'BMO_MISSING'
 
 	def __init__(self, parent, psc_handler, dms, prj, ge_host):
 		Tkinter.Frame.__init__(self, parent)
@@ -163,7 +173,9 @@ class MyGUI(Tkinter.Frame):
 		self._dms = dms
 		self._prj = prj
 		self._ge_host = ge_host
-		self._imgreinit = ''
+
+		# DMS-events when PSC files gets opened in GE
+		self._image_queue = queue.Queue()
 
 		self._canvas_frame = Tkinter.Frame(master=self)
 		self._canvas_visu = None
@@ -172,7 +184,7 @@ class MyGUI(Tkinter.Frame):
 		self.pack(fill=Tkconstants.BOTH, expand=True)
 
 
-		self._register_dms_callbacks()
+		self._register_dms_callback()
 
 
 	def _buildCanvasVisu(self, parent):
@@ -182,59 +194,83 @@ class MyGUI(Tkinter.Frame):
 			# http://stackoverflow.com/questions/3962247/python-removing-a-tkinter-frame
 			self._canvas_visu.grid_forget()
 			self._canvas_visu.destroy()
-		self._canvas_visu = Tkinter.Canvas(parent, width=1280, height=1024, background="white")
-		self._canvas_visu.grid(row=0, column=1, padx=5)
+
+		vsb = ttk.Scrollbar(master=parent, orient="vertical")
+		hsb = ttk.Scrollbar(master=parent, orient="horizontal")
+		self._canvas_visu = Tkinter.Canvas(parent, width=1280, height=1024, background="white",
+		                                   yscrollcommand=vsb.set, xscrollcommand=hsb.set)
+		# enabling scrolling: http://effbot.org/tkinterbook/canvas.htm#coordinate-systems
+		# FIXME: changing size of rootwindow doesn't affect scrollbars
+		# FIXME: should we scale canvas or use scrollbars when user resizes rootwindow? some PSC windows are huge...!
+		# FIXME: we should adjust "width" and "heigth" dynamically from max(max coordinates of PSC graphelements, size PSC window)
+		# FIXME: we should implement a cleaner design. canvas widget into own class.
+		# FIXME: implement drag and drop for setting links (while moving: drawing line. on drop: show popup with PAR_INs/PLCs)
+		#       https://stackoverflow.com/questions/44887576/how-make-drag-and-drop-interface
+		#       https://stackoverflow.com/questions/15466469/tkinter-drag-and-drop
+		# FIXME: implement right-click "delete link" / "show parameters" (edit fields?)
+		# FIXME: implement mouse-hover: label showing BMO instance & class under mouse
+		# FIXME: checkbox "show links" ->red=digital, green=analog (only from/to one BMO instance, or between all?)
+		self._canvas_visu.config(scrollregion=self._canvas_visu.bbox(Tkinter.ALL))
+		self._canvas_visu.grid(row=0, column=0, padx=5)
+
+		# Arrange the scrollbars in the toplevel
+		vsb.grid(row=0, column=1, sticky='ns')
+		hsb.grid(row=1, column=0, sticky='ew')
 
 
-	def _register_dms_callbacks(self):
+	def _register_dms_callback(self):
 		"""
 		monitoring PSC document opening activity in currently running GE instance
 		"""
 
-		dms_key1_str = ':'.join(['System:Node', self._ge_host, 'ImgReInit'])
-		dms_key2_str = ':'.join(['System:Node', self._ge_host, 'Image'])
+		dms_key_str = ':'.join(['System:Node', self._ge_host, 'Image'])
 
-		for dms_key_str, callback in [(dms_key1_str, self._cb_ge_reinit_changed),
-		                              (dms_key2_str, self._cb_ge_image_changed)]:
-			logger.debug('MyGUI._register_dms_callback(): trying to subscribe DMS key "' + dms_key_str + '"...')
-			sub_obj = self._dms.get_dp_subscription(path=dms_key_str,
-			                                        event=dms.ON_SET)
-			logger.debug('MyGUI._register_dms_callback(): adding callback for DMS key "' + dms_key_str + '"...')
-			msg = sub_obj.sub_response.message
-			if not msg:
-				sub_obj += callback
+		logger.debug('MyGUI._register_dms_callback(): trying to subscribe DMS key "' + dms_key_str + '"...')
+		sub_obj = self._dms.get_dp_subscription(path=dms_key_str,
+		                                        event=dms.ON_SET)
+		logger.debug('MyGUI._register_dms_callback(): adding callback for DMS key "' + dms_key_str + '"...')
+		msg = sub_obj.sub_response.message
+		if not msg:
+			sub_obj += self._dms_callback_ge_image_changed
 
-				# first run: use information we got from subscription
-				callback(None, sub_obj.sub_response.value)
-				logger.info('MyGUI._register_dms_callback(): monitoring of DMS key "' + dms_key_str + '" is ready.')
-			else:
-				logger.error('MyGUI._register_dms_callback(): monitoring of DMS key "' + dms_key_str + '" failed! [message: ' + msg + '])')
-				raise Exception('subscription failed!')
-
-
-	def _cb_ge_reinit_changed(self, event, *args):
-		""" another PSC file was opened in GE (instance of BMO) """
-		if args:
-			# first run
-			self._imgreinit = args[0]
+			# first run: use information we got from subscription
+			self._ge_image_changed(new_image=sub_obj.sub_response.value)
+			logger.info('MyGUI._register_dms_callback(): monitoring of DMS key "' + dms_key_str + '" is ready.')
 		else:
-			# assumption: called by DMS event
-			self._imgreinit = event.value
+			logger.error('MyGUI._register_dms_callback(): monitoring of DMS key "' + dms_key_str + '" failed! [message: ' + msg + '])')
+			raise Exception('subscription failed!')
 
 
-	def _cb_ge_image_changed(self, event, *args):
+	def _dms_callback_ge_image_changed(self, event):
+		""" another PSC file was opened in GE (method is executed in thread of DMS-eventfiring) """
+		# against freezing of GUI: thread synchronisation DMS-event -> GUI mainloop
+		# (as explained on https://scorython.wordpress.com/2016/06/27/multithreading-with-tkinter/ )
+		self._image_queue.put(event)
+
+
+	def _ge_image_changed(self, new_image=''):
 		""" another PSC file was opened in GE """
-		if args:
-			# first run
-			filename = args[0]
-		else:
-			# assumption: called by DMS event
-			filename = event.value
+		filename = new_image
+		if not new_image:
+			# assumption: called by Tkinter schedule
+			try:
+				event = self._image_queue.get(block=False)
+			except queue.Empty:
+				pass
+			else:
+				# (this is an optional else clause when no exception occured)
+				logger.debug('MyGUI._ge_image_changed(): got DMS-event [DMS-key="' + event.path + '" / value=' + event.value + ']')
+				filename = event.value
 
-		# only redraw canvas when shown PSC is not a reinit of BMO instance
-		if not self._imgreinit:
-			logger.debug('MyGUI._cb_ge_image_changed(): GE opened PSC file "' + filename + '"')
-			self._load_psc_image(filename)
+		if filename:
+			# only redraw canvas when shown PSC is not a reinit of BMO instance
+			dms_key_str = ':'.join(['System:Node', self._ge_host, 'ImgReInit'])
+			if not self._dms.dp_get(path=dms_key_str)[0].value:
+				logger.info('MyGUI._cb_ge_image_changed(): GE opened PSC file "' + filename + '"')
+				self._load_psc_image(filename)
+
+		# scheduling next execution
+		self.after(100, self._ge_image_changed)
 
 
 	def _load_psc_image(self, filename):
@@ -250,7 +286,15 @@ class MyGUI(Tkinter.Frame):
 
 	def _update_canvas(self):
 		self._buildCanvasVisu(parent=self._canvas_frame)
-		self.psc_handler.draw_elements(canvas_visu=self._canvas_visu)
+
+		def bmo_exists(instance_str):
+			# check if BMO instance does exist
+			dms_key_str = ':'.join([instance_str, 'OBJECT'])
+			resp = self._dms.dp_get(path=dms_key_str)
+			return resp[0].code == 'ok'
+
+		self.psc_handler.draw_elements(canvas_visu=self._canvas_visu,
+		                               bmo_check_func=bmo_exists)
 
 
 
