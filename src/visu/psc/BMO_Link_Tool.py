@@ -84,15 +84,23 @@ class BMO_Elements_Handler(object):
 	"""
 	extracts data of PSC BMO elements
 	"""
+
+	# margin around elements most right and most down
+	MARGIN_SIZE = 10
+
 	def __init__(self):
 		self.fname = None
 
 		self._bmo_instances = {}
 
+		# maximal size of canvas for drawing all BMOs
+		self._used_area = 100, 100
+
 	def set_psc_file(self, fname):
 		self.fname = fname
 		self.curr_file = Parser.PscFile(self.fname)
 		self.curr_file.parse_file()
+		self._used_area = 100, 100
 
 	def is_ready(self):
 		return self.fname != None
@@ -105,7 +113,7 @@ class BMO_Elements_Handler(object):
 		for elem in self.curr_file.get_psc_elem_list():
 			# ignore elements without BMO instance
 			bmo_instance = elem.get_property(u'bmo-instance').get_value()
-			if bmo_instance != "" and not bmo_instance.startswith("BMO:"):
+			if bmo_instance != "":
 				# do we have to check this PSC element?
 				bmo_class = elem.get_property(u'bmo-class').get_value().replace("BMO:", '')
 				yield elem, bmo_instance, bmo_class
@@ -125,6 +133,11 @@ class BMO_Elements_Handler(object):
 				y1 = coords[1] if coords[1] < _y1 else _y1
 				y2 = coords[3] if coords[3] > _y2 else _y2
 				self._bmo_instances[instance].set_max_coords(x1, y1, x2, y2)
+
+				# update size of canvas
+				max_x = max(self._used_area[0], x2)
+				max_y = max(self._used_area[1], y2)
+				self._used_area = max_x, max_y
 			except KeyError:
 				# first appearance of this BMO instance
 				self._bmo_instances[instance] = BMO_Instance_Metadata()
@@ -137,21 +150,30 @@ class BMO_Elements_Handler(object):
 			logger.debug('draw_elements(): BMO instance "' + instance + '" [' + self._bmo_instances[instance].get_BMO_class() + '] has maximum coordinates ' + repr(metadata.get_max_coords()))
 			if bmo_check_func(instance):
 				# BMO instance does exist
-				fillcolor = "green"
-				tags = (MyGUI.BMO_EXISTS_TAG, instance)
+				if instance.startswith("BMO:"):
+					# BMO is not reinitialized!
+					fillcolor = "gray"
+					tags = (MyGUI.BMO_TEMPLATE_TAG, instance)
+				else:
+					fillcolor = "green"
+					tags = (MyGUI.BMO_EXISTS_TAG, instance)
 			else:
 				fillcolor = "red"
 				tags = (MyGUI.BMO_MISSING_TAG, instance)
 			# hint about using tags: http://effbot.org/tkinterbook/canvas.htm#item-specifiers
 			canvas_visu.create_rectangle(*metadata.get_max_coords(), fill=fillcolor, outline="blue", tags=tags)
 
-			# add text into rectangle
+			# add text over rectangle (and reusing same tags for event binding)
 			# help from https://stackoverflow.com/questions/39087139/tkinter-label-text-in-canvas-rectangle-python
 			# calculate center:
 			x1, y1, x2, y2 = metadata.get_max_coords()
 			x = (x1 + x2) / 2
 			y = (y1 + y2) / 2
-			canvas_visu.create_text((x, y), text=self._bmo_instances[instance].get_BMO_class())
+			canvas_visu.create_text((x, y), text=self._bmo_instances[instance].get_BMO_class(), tags=tags)
+
+			# update minimal size of canvas
+			canvas_visu.configure(width=self._used_area[0] + BMO_Elements_Handler.MARGIN_SIZE)
+			canvas_visu.configure(height=self._used_area[1] + BMO_Elements_Handler.MARGIN_SIZE)
 
 
 
@@ -162,6 +184,19 @@ class MyGUI(Tkinter.Frame):
 
 	BMO_EXISTS_TAG = 'BMO_EXISTS'
 	BMO_MISSING_TAG = 'BMO_MISSING'
+	BMO_TEMPLATE_TAG = 'BMO_TEMPLATE'
+
+	BMO_INFO_DICT = {BMO_EXISTS_TAG: 'okay',
+	                 BMO_MISSING_TAG: 'not in DMS',
+	                 BMO_TEMPLATE_TAG: 'not reinitialized'}
+
+	CANVAS_LINK_LINE_TAG = 'CANVAS_LINK_LINE'
+
+	CANVAS_WIDTH = 1920
+	CANVAS_HEIGHT = 1080
+	# FIXME: test with a smaller screen resolution
+	#CANVAS_WIDTH = 800
+	#CANVAS_HEIGHT = 600
 
 	def __init__(self, parent, psc_handler, dms, prj, ge_host):
 		Tkinter.Frame.__init__(self, parent)
@@ -180,8 +215,16 @@ class MyGUI(Tkinter.Frame):
 		self._canvas_frame = Tkinter.Frame(master=self)
 		self._canvas_visu = None
 		self._buildCanvasVisu(parent=self._canvas_frame)
-		self._canvas_frame.pack(fill=Tkconstants.BOTH, expand=True)
-		self.pack(fill=Tkconstants.BOTH, expand=True)
+
+		# Make the canvas expandable
+		self._canvas_frame.rowconfigure(0, weight=1)
+		self._canvas_frame.columnconfigure(0, weight=1)
+
+		self._canvas_frame.grid(row=0, column=0, sticky='nsew')
+		self.grid(row=1, column=0, sticky='nsew')
+
+
+
 
 
 		self._register_dms_callback()
@@ -195,11 +238,9 @@ class MyGUI(Tkinter.Frame):
 			self._canvas_visu.grid_forget()
 			self._canvas_visu.destroy()
 
-		vsb = ttk.Scrollbar(master=parent, orient="vertical")
-		hsb = ttk.Scrollbar(master=parent, orient="horizontal")
-		self._canvas_visu = Tkinter.Canvas(parent, width=1280, height=1024, background="white",
-		                                   yscrollcommand=vsb.set, xscrollcommand=hsb.set)
-		# enabling scrolling: http://effbot.org/tkinterbook/canvas.htm#coordinate-systems
+		self._canvas_visu = Tkinter.Canvas(parent, width=MyGUI.CANVAS_WIDTH, height=MyGUI.CANVAS_HEIGHT, background="white")
+
+		# FIXME: enabling scrolling: http://effbot.org/tkinterbook/canvas.htm#coordinate-systems
 		# FIXME: changing size of rootwindow doesn't affect scrollbars
 		# FIXME: should we scale canvas or use scrollbars when user resizes rootwindow? some PSC windows are huge...!
 		# FIXME: we should adjust "width" and "heigth" dynamically from max(max coordinates of PSC graphelements, size PSC window)
@@ -210,12 +251,116 @@ class MyGUI(Tkinter.Frame):
 		# FIXME: implement right-click "delete link" / "show parameters" (edit fields?)
 		# FIXME: implement mouse-hover: label showing BMO instance & class under mouse
 		# FIXME: checkbox "show links" ->red=digital, green=analog (only from/to one BMO instance, or between all?)
-		self._canvas_visu.config(scrollregion=self._canvas_visu.bbox(Tkinter.ALL))
-		self._canvas_visu.grid(row=0, column=0, padx=5)
+		self._canvas_visu.grid(row=0, column=0, padx=10, pady=10, sticky='nsew')
 
-		# Arrange the scrollbars in the toplevel
-		vsb.grid(row=0, column=1, sticky='ns')
-		hsb.grid(row=1, column=0, sticky='ew')
+		# show information when mouse is over a BMO instance
+		# =>help from https://stackoverflow.com/questions/33121545/how-to-display-canvas-coordinates-when-hovering-cursor-over-canvas
+		self._canvas_visu.bind('<Motion>', self._on_mouseover)
+		self._canvas_visu.bind('<Enter>', self._on_mouseover)  # handle <Alt>+<Tab> switches between windows
+
+		self._bmo_info_label = Tkinter.Label(master=parent, text='', anchor='w')
+		self._bmo_info_label.grid(row=1, column=0, padx=10, pady=10, sticky='ew')
+
+		# create BMO link: drag and drop a line for visualisation
+		# help from https://stackoverflow.com/questions/6740855/board-drawing-code-to-move-an-oval/6789351#6789351
+		# this data is used to keep track of line being dragged
+		self._drag_data = {"x": 0, "y": 0, "source_item": None}
+		# add bindings for clicking, dragging and releasing over
+		# any object with the "BMO_EXISTS" tag
+		self._canvas_visu.tag_bind(MyGUI.BMO_EXISTS_TAG, "<ButtonPress-1>", self._on_mouse_press)
+		self._canvas_visu.tag_bind(MyGUI.BMO_EXISTS_TAG, "<ButtonRelease-1>", self._on_mouse_release)
+		self._canvas_visu.bind("<B1-Motion>", self._on_mouse_b1motion)
+
+
+	def _on_mouseover(self, event):
+		""" update BMO information """
+		# help from http://effbot.org/tkinterbook/canvas.htm#item-specifiers
+		# and https://stackoverflow.com/questions/13114953/how-do-i-get-id-of-a-widget-that-invoke-an-event-tkinter
+
+		canvas = event.widget
+		x = canvas.canvasx(event.x)
+		y = canvas.canvasy(event.y)
+		x1 = x - 1
+		x2 = x + 1
+		y1 = y - 1
+		y2 = y + 1
+		try:
+			rect = canvas.find_overlapping(x1, y1, x2, y2)[0]
+			state = ''
+			instance = ''
+			for tag in self._canvas_visu.gettags(rect):
+				if tag in MyGUI.BMO_INFO_DICT:
+					state = MyGUI.BMO_INFO_DICT[tag]
+				elif ':' in tag:
+					# assuming BMO instance
+					instance = tag
+			curr_text = instance + '\t[' + state + ']'
+		except IndexError:
+			curr_text = ''
+		self._bmo_info_label.configure(text=curr_text)
+
+
+	def _on_mouse_press(self, event):
+		'''Begining dragging of line from source BMO instance'''
+		# record the item and its location
+		canvas = event.widget
+		x = canvas.canvasx(event.x)
+		y = canvas.canvasy(event.y)
+		#self._drag_data["source_item"] = event.widget.find_closest(event.x, event.y)[0]
+		self._drag_data["source_item"] = event.widget.find_closest(x, y)[0]
+		self._drag_data["x"] = event.x
+		self._drag_data["y"] = event.y
+
+		# draw link line with length 1
+		event.widget.create_line(event.x, event.y, event.x, event.y, width=2.0, arrow="last", tags=MyGUI.CANVAS_LINK_LINE_TAG)
+
+
+	def _on_mouse_release(self, event):
+		'''End drag of line to destination BMO instance'''
+
+		# delete link line
+		event.widget.delete(MyGUI.CANVAS_LINK_LINE_TAG)
+
+		# FIXME: open popup window for adjusting link details (table analog/digital sorted PAR_OUT -> PAR_IN)
+		src_instance = ''
+		for tag in self._canvas_visu.gettags(self._drag_data["source_item"]):
+			if ':' in tag:
+				# assuming BMO instance
+				src_instance = tag
+				break
+
+		canvas = event.widget
+		x = canvas.canvasx(event.x)
+		y = canvas.canvasy(event.y)
+		x1 = x - 1
+		x2 = x + 1
+		y1 = y - 1
+		y2 = y + 1
+		try:
+			item = canvas.find_overlapping(x1, y1, x2, y2)[0]
+			for tag in self._canvas_visu.gettags(item):
+				if ':' in tag:
+					# assuming BMO instance
+					dst_instance = tag
+					break
+		except IndexError:
+			dst_instance = ''
+
+		logger.debug('MyGUI._on_mouse_release(): create BMO link: ' + src_instance + ' -> ' + dst_instance)
+		# reset the drag information
+		self._drag_data["source_item"] = None
+		self._drag_data["x"] = 0
+		self._drag_data["y"] = 0
+
+
+	def _on_mouse_b1motion(self, event):
+		'''Handle drawing line from source BMO instance'''
+
+		# change coordinates of link line
+		# help from http://effbot.org/tkinterbook/canvas.htm#patterns
+		# and https://stackoverflow.com/questions/13114953/how-do-i-get-id-of-a-widget-that-invoke-an-event-tkinter
+		canvas = event.widget
+		canvas.coords(MyGUI.CANVAS_LINK_LINE_TAG, self._drag_data["x"], self._drag_data["y"], event.x, event.y)
 
 
 	def _register_dms_callback(self):
@@ -295,6 +440,7 @@ class MyGUI(Tkinter.Frame):
 
 		self.psc_handler.draw_elements(canvas_visu=self._canvas_visu,
 		                               bmo_check_func=bmo_exists)
+
 
 
 
