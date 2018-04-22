@@ -30,7 +30,7 @@ import misc.timezone as timezone
 import numpy as np
 import matplotlib.pyplot as plt
 import pandas as pd
-import subprocess
+
 import threading
 import queue
 import shlex
@@ -57,6 +57,46 @@ ch.setFormatter(formatter)
 
 # add ch to logger
 logger.addHandler(ch)
+
+
+class Filewatcher(threading.Thread):
+
+	# used integer values in Queue for signalling to GUI
+	HAS_CHANGED = 1
+
+	def __init__(self):
+		threading.Thread.__init__(self)
+		self.has_changed_queue = queue.Queue()     # signalling to GUI
+		self._keep_running = False
+		self._fullpath = ''
+		self._pause = 1          #
+		self._modification_time = 0
+		self.daemon = True
+
+	def run(self):
+		while self._keep_running:
+			if self._fullpath:
+				modtime = os.stat(self._fullpath).st_mtime
+				if not self._modification_time:
+					# first run
+					self._modification_time = modtime
+				elif modtime != self._modification_time:
+					self.has_changed_queue.put(Filewatcher.HAS_CHANGED)
+					self._modification_time = modtime
+			time.sleep(self._pause)
+
+	def set_fullpath(self, fullpath):
+		logger.debug('Filewatcher.set_fullpath(): new file for watching: ' + fullpath)
+		self._modification_time = 0
+		self._fullpath = fullpath
+
+	def start_watching(self, pause=1):
+		self._keep_running = True
+		self._pause = pause
+		self.start()
+
+	def stop_watching(self):
+		self._keep_running = False
 
 
 class BMO_Instance_Metadata(object):
@@ -97,7 +137,9 @@ class BMO_Elements_Handler(object):
 		self._used_area = 100, 100
 
 	def set_psc_file(self, fname):
-		self.fname = fname
+		if fname:
+			# new PSC file
+			self.fname = fname
 		self.curr_file = Parser.PscFile(self.fname)
 		self.curr_file.parse_file()
 		self._used_area = 100, 100
@@ -198,13 +240,14 @@ class MyGUI(Tkinter.Frame):
 	#CANVAS_WIDTH = 800
 	#CANVAS_HEIGHT = 600
 
-	def __init__(self, parent, psc_handler, dms, prj, ge_host):
+	def __init__(self, parent, psc_handler, filewatcher, dms, prj, ge_host):
 		Tkinter.Frame.__init__(self, parent)
 		self.parent = parent
 		# settings of rootwindow
 		self.parent.title(MyGUI.ROOT_TITLE + u' - no PSC file loaded')
 
 		self.psc_handler = psc_handler
+		self._filewatcher = filewatcher
 		self._dms = dms
 		self._prj = prj
 		self._ge_host = ge_host
@@ -223,11 +266,12 @@ class MyGUI(Tkinter.Frame):
 		self._canvas_frame.grid(row=0, column=0, sticky='nsew')
 		self.grid(row=1, column=0, sticky='nsew')
 
-
-
-
-
+		# activate watching of GE
 		self._register_dms_callback()
+
+		# activate watching of PSC-file
+		self._filewatcher.start_watching()
+		self._ge_psc_changed()
 
 
 	def _buildCanvasVisu(self, parent):
@@ -265,10 +309,9 @@ class MyGUI(Tkinter.Frame):
 		# help from https://stackoverflow.com/questions/6740855/board-drawing-code-to-move-an-oval/6789351#6789351
 		# this data is used to keep track of line being dragged
 		self._drag_data = {"x": 0, "y": 0, "source_item": None}
-		# add bindings for clicking, dragging and releasing over
-		# any object with the "BMO_EXISTS" tag
-		self._canvas_visu.tag_bind(MyGUI.BMO_EXISTS_TAG, "<ButtonPress-1>", self._on_mouse_press)
-		self._canvas_visu.tag_bind(MyGUI.BMO_EXISTS_TAG, "<ButtonRelease-1>", self._on_mouse_release)
+		# add bindings for clicking, dragging and releasing
+		self._canvas_visu.bind("<ButtonPress-1>", self._on_mouse_press)
+		self._canvas_visu.bind("<ButtonRelease-1>", self._on_mouse_release)
 		self._canvas_visu.bind("<B1-Motion>", self._on_mouse_b1motion)
 
 
@@ -301,34 +344,8 @@ class MyGUI(Tkinter.Frame):
 
 
 	def _on_mouse_press(self, event):
-		'''Begining dragging of line from source BMO instance'''
+		'''Beginning dragging of line from source BMO instance'''
 		# record the item and its location
-		canvas = event.widget
-		x = canvas.canvasx(event.x)
-		y = canvas.canvasy(event.y)
-		#self._drag_data["source_item"] = event.widget.find_closest(event.x, event.y)[0]
-		self._drag_data["source_item"] = event.widget.find_closest(x, y)[0]
-		self._drag_data["x"] = event.x
-		self._drag_data["y"] = event.y
-
-		# draw link line with length 1
-		event.widget.create_line(event.x, event.y, event.x, event.y, width=2.0, arrow="last", tags=MyGUI.CANVAS_LINK_LINE_TAG)
-
-
-	def _on_mouse_release(self, event):
-		'''End drag of line to destination BMO instance'''
-
-		# delete link line
-		event.widget.delete(MyGUI.CANVAS_LINK_LINE_TAG)
-
-		# FIXME: open popup window for adjusting link details (table analog/digital sorted PAR_OUT -> PAR_IN)
-		src_instance = ''
-		for tag in self._canvas_visu.gettags(self._drag_data["source_item"]):
-			if ':' in tag:
-				# assuming BMO instance
-				src_instance = tag
-				break
-
 		canvas = event.widget
 		x = canvas.canvasx(event.x)
 		y = canvas.canvasy(event.y)
@@ -338,16 +355,70 @@ class MyGUI(Tkinter.Frame):
 		y2 = y + 1
 		try:
 			item = canvas.find_overlapping(x1, y1, x2, y2)[0]
-			for tag in self._canvas_visu.gettags(item):
+			tags = self._canvas_visu.gettags(item)
+			if MyGUI.BMO_EXISTS_TAG in tags:
+				self._drag_data["source_item"] = item
+				self._drag_data["x"] = event.x
+				self._drag_data["y"] = event.y
+				logger.debug('MyGUI._on_mouse_press(): found valid link source.')
+
+				# draw link line with length 1
+				event.widget.create_line(event.x, event.y, event.x, event.y, width=2.0, arrow="last",
+				                         tags=MyGUI.CANVAS_LINK_LINE_TAG)
+			else:
+				logger.debug('MyGUI._on_mouse_press(): ignoring invalid link source...')
+		except IndexError:
+			# no BMO instance at press point
+			logger.debug('MyGUI._on_mouse_press(): no BMO instance at press point...')
+			self._drag_data["source_item"] = None
+			self._drag_data["x"] = 0
+			self._drag_data["y"] = 0
+
+
+	def _on_mouse_release(self, event):
+		'''End drag of line to destination BMO instance'''
+
+		# delete link line
+		event.widget.delete(MyGUI.CANVAS_LINK_LINE_TAG)
+
+		# analyze release point
+		dst_instance = ''
+		canvas = event.widget
+		x = canvas.canvasx(event.x)
+		y = canvas.canvasy(event.y)
+		x1 = x - 1
+		x2 = x + 1
+		y1 = y - 1
+		y2 = y + 1
+		try:
+			item = canvas.find_overlapping(x1, y1, x2, y2)[0]
+			tags = self._canvas_visu.gettags(item)
+			if MyGUI.BMO_EXISTS_TAG in tags:
+				for tag in tags:
+					if ':' in tag:
+						# assuming BMO instance
+						dst_instance = tag
+						logger.debug('MyGUI._on_mouse_release(): ' + dst_instance + ' is a valid link destination.')
+						break
+			elif MyGUI.BMO_MISSING_TAG in tags:
+				logger.debug('MyGUI._on_mouse_release(): missing BMO instance at release point...')
+			elif MyGUI.BMO_TEMPLATE_TAG in tags:
+				logger.debug('MyGUI._on_mouse_release(): uninitialized BMO instance at release point...')
+		except IndexError:
+			# no BMO instance at release point
+			logger.debug('MyGUI._on_mouse_release(): no BMO instance at release point...')
+
+		if dst_instance and self._drag_data["source_item"]:
+			# open popup window for adjusting link details
+			src_instance = ''
+			for tag in self._canvas_visu.gettags(self._drag_data["source_item"]):
 				if ':' in tag:
 					# assuming BMO instance
-					dst_instance = tag
+					src_instance = tag
 					break
-		except IndexError:
-			dst_instance = ''
+			logger.info('MyGUI._on_mouse_release(): create BMO link: ' + src_instance + ' -> ' + dst_instance)
 
-		logger.debug('MyGUI._on_mouse_release(): create BMO link: ' + src_instance + ' -> ' + dst_instance)
-		# reset the drag information
+		logger.debug('MyGUI._on_mouse_release(): resetting drag & drop information.')
 		self._drag_data["source_item"] = None
 		self._drag_data["x"] = 0
 		self._drag_data["y"] = 0
@@ -356,11 +427,12 @@ class MyGUI(Tkinter.Frame):
 	def _on_mouse_b1motion(self, event):
 		'''Handle drawing line from source BMO instance'''
 
-		# change coordinates of link line
-		# help from http://effbot.org/tkinterbook/canvas.htm#patterns
-		# and https://stackoverflow.com/questions/13114953/how-do-i-get-id-of-a-widget-that-invoke-an-event-tkinter
-		canvas = event.widget
-		canvas.coords(MyGUI.CANVAS_LINK_LINE_TAG, self._drag_data["x"], self._drag_data["y"], event.x, event.y)
+		if self._drag_data["source_item"]:
+			# change coordinates of link line
+			# help from http://effbot.org/tkinterbook/canvas.htm#patterns
+			# and https://stackoverflow.com/questions/13114953/how-do-i-get-id-of-a-widget-that-invoke-an-event-tkinter
+			canvas = event.widget
+			canvas.coords(MyGUI.CANVAS_LINK_LINE_TAG, self._drag_data["x"], self._drag_data["y"], event.x, event.y)
 
 
 	def _register_dms_callback(self):
@@ -395,13 +467,16 @@ class MyGUI(Tkinter.Frame):
 
 	def _ge_image_changed(self, new_image=''):
 		""" another PSC file was opened in GE """
-		filename = new_image
-		if not new_image:
+
+		if new_image:
+			# assumption: called during initialisation
+			filename = new_image
+		else:
 			# assumption: called by Tkinter schedule
 			try:
 				event = self._image_queue.get(block=False)
 			except queue.Empty:
-				pass
+				filename = ''
 			else:
 				# (this is an optional else clause when no exception occured)
 				logger.debug('MyGUI._ge_image_changed(): got DMS-event [DMS-key="' + event.path + '" / value=' + event.value + ']')
@@ -412,20 +487,41 @@ class MyGUI(Tkinter.Frame):
 			dms_key_str = ':'.join(['System:Node', self._ge_host, 'ImgReInit'])
 			if not self._dms.dp_get(path=dms_key_str)[0].value:
 				logger.info('MyGUI._cb_ge_image_changed(): GE opened PSC file "' + filename + '"')
-				self._load_psc_image(filename)
+				psc_fullpath = os.path.join(self._prj, 'scr', filename)
+				self._load_psc_image(psc_fullpath)
 
 		# scheduling next execution
-		self.after(100, self._ge_image_changed)
+		self.after(200, self._ge_image_changed)
 
 
-	def _load_psc_image(self, filename):
-		psc_fullpath = os.path.join(self._prj, 'scr', filename)
+	def _ge_psc_changed(self):
+		""" consume filechanges from filewatcher """
 
-		# settings of rootwindow
-		self.parent.title(MyGUI.ROOT_TITLE + u' - ' + psc_fullpath)
+		try:
+			change = self._filewatcher.has_changed_queue.get(block=False)
+		except queue.Empty:
+			pass
+		else:
+			# (this is an optional else clause when no exception occured)
+			if change == Filewatcher.HAS_CHANGED:
+				logger.info('MyGUI._ge_psc_changed(): current PSC file was changed... =>reloading it')
+				self._load_psc_image(psc_fullpath=None)
 
-		# preset parser and load PSC image
-		self.psc_handler.set_psc_file(psc_fullpath)
+		# scheduling next execution
+		self.after(200, self._ge_psc_changed)
+
+
+	def _load_psc_image(self, psc_fullpath):
+		if psc_fullpath:
+			# settings of rootwindow
+			self.parent.title(MyGUI.ROOT_TITLE + u' - ' + psc_fullpath)
+
+			# preset parser and load PSC image
+			self.psc_handler.set_psc_file(psc_fullpath)
+			self._filewatcher.set_fullpath(psc_fullpath)
+		else:
+			# need to reload current PSC file
+			self.psc_handler.set_psc_file(fname=None)
 		self._update_canvas()
 
 
@@ -466,10 +562,11 @@ def main(dms_server, dms_port):
 			Parser.PscParser.load_config(Parser.PARSERCONFIGFILE)
 
 			curr_psc_handler = BMO_Elements_Handler()
+			filewatcher = Filewatcher()
 
 			# Build a gui
 			rootWindow = Tkinter.Tk()
-			app = MyGUI(parent=rootWindow, psc_handler=curr_psc_handler, dms=dms_ws, prj=curr_proj, ge_host=curr_ge_host)
+			app = MyGUI(parent=rootWindow, psc_handler=curr_psc_handler, filewatcher=filewatcher, dms=dms_ws, prj=curr_proj, ge_host=curr_ge_host)
 
 			# Keeps GUI mainloop running until GUI is closed
 			rootWindow.mainloop()
