@@ -119,6 +119,13 @@ class BMO_Instance_Metadata(object):
 	def get_max_coords(self):
 		return self._max_coords
 
+	def get_center_coords(self):
+		# calculate center
+		x1, y1, x2, y2 = self.get_max_coords()
+		x = (x1 + x2) / 2
+		y = (y1 + y2) / 2
+		return x, y
+
 
 class BMO_Elements_Handler(object):
 	"""
@@ -132,6 +139,8 @@ class BMO_Elements_Handler(object):
 		self.fname = None
 
 		self._bmo_instances = {}
+
+		self._existing_bmos_list = []
 
 		# maximal size of canvas for drawing all BMOs
 		self._used_area = 100, 100
@@ -163,6 +172,7 @@ class BMO_Elements_Handler(object):
 
 	def draw_elements(self, canvas_visu, bmo_check_func):
 		self._bmo_instances = {}
+		self._existing_bmos_list = []
 
 		# collect information for draw this element
 		for elem, instance, bmo_class in self._filtered_elements():
@@ -187,7 +197,7 @@ class BMO_Elements_Handler(object):
 
 			self._bmo_instances[instance].set_BMO_class(bmo_class)
 
-		# draw this list on main canvas
+		# draw rectangles on main canvas
 		for instance, metadata in self._bmo_instances.items():
 			logger.debug('draw_elements(): BMO instance "' + instance + '" [' + self._bmo_instances[instance].get_BMO_class() + '] has maximum coordinates ' + repr(metadata.get_max_coords()))
 			if bmo_check_func(instance):
@@ -199,6 +209,7 @@ class BMO_Elements_Handler(object):
 				else:
 					fillcolor = "green"
 					tags = (MyGUI.BMO_EXISTS_TAG, instance)
+					self._existing_bmos_list.append(instance)
 			else:
 				fillcolor = "red"
 				tags = (MyGUI.BMO_MISSING_TAG, instance)
@@ -207,16 +218,98 @@ class BMO_Elements_Handler(object):
 
 			# add text over rectangle (and reusing same tags for event binding)
 			# help from https://stackoverflow.com/questions/39087139/tkinter-label-text-in-canvas-rectangle-python
-			# calculate center:
-			x1, y1, x2, y2 = metadata.get_max_coords()
-			x = (x1 + x2) / 2
-			y = (y1 + y2) / 2
+			x, y = metadata.get_center_coords()
 			canvas_visu.create_text((x, y), text=self._bmo_instances[instance].get_BMO_class(), tags=tags)
 
 			# update minimal size of canvas
-			canvas_visu.configure(width=self._used_area[0] + BMO_Elements_Handler.MARGIN_SIZE)
-			canvas_visu.configure(height=self._used_area[1] + BMO_Elements_Handler.MARGIN_SIZE)
+			canvas_visu.configure(width=self._used_area[0] + BMO_Elements_Handler.MARGIN_SIZE,
+			                      height=self._used_area[1] + BMO_Elements_Handler.MARGIN_SIZE)
 
+
+	def draw_connections(self, dms_ws, canvas_visu, bmo_inst_str):
+		""" draw connections from/to other BMO instances """
+
+		# some ideas:
+		# -drawing lines behind other items from center to center
+		# -digital = red, analog = green
+		# -arrows for showing signal direction (PAR_OUT -> PAR_IN; convention: "pull", not "push")
+		# FIXME: how to remove (or hide) all other connections and not interfering with drag&drop operation? Using tags?
+
+		class Linkpoint(object):
+			def __init__(self, name, type):
+				self.name = name
+				self.type = type
+
+		if bmo_inst_str:
+			# FIXME: perhaps we can combine both directions into a simpler code fragment?
+			# FIXME: perhaps we could use "extInfos" for getting BMO instance directly from DMS?
+			# links to this instance
+			incoming_list = []
+			for resp in dms_ws.dp_get(path="",
+			                          query=dms.Query(regExPath=r'^' + bmo_inst_str + r':\w+:PAR_IN$',
+			                                          isType="string",
+			                                          maxDepth=0)):
+				if resp.value:
+					# FIXME: we need to check DMS datatype of link source and link drain!!!
+					# FIXME: we need to check if it's a valid PAR_IN and PAR_OUT!!!
+					for inst in self._bmo_instances:
+						if inst in resp.value:
+							# BMO link is on current PSC file
+
+							# getting datatype of PLC datapoint
+							# =>assuming other side is a valid PAR_OUT of inst
+							# =>assuming other side has same datatype as our PAR_IN
+							plc_dp = resp.path.split(":PAR_IN")[0]
+							plc_dp_resp = dms_ws.dp_get(path=plc_dp)[0]
+							if not plc_dp_resp.message:
+								incoming_list.append(Linkpoint(name=inst, type=plc_dp_resp.type))
+								break
+			logger.debug('BMO_Elements_Handler.draw_connections(): incoming_list=' + repr(incoming_list))
+
+			# drawing links to this instance
+			for src in incoming_list:
+				x1, y1 = self._bmo_instances[src.name].get_center_coords()
+				x2, y2 = self._bmo_instances[bmo_inst_str].get_center_coords()
+				curr_color = "dark red" if src.type == "bool" else "dark green"
+				canvas_visu.create_line(x1, y1, x2, y2, fill=curr_color, width=2.0, arrow="last",
+				                        tags=MyGUI.CANVAS_BG_LINK_LINE_TAG)
+
+			# links from this instance
+			outgoing_list = []
+			for resp in dms_ws.dp_get(path="",
+			                          query=dms.Query(regExValue=r'^' + bmo_inst_str + r':\w+',
+			                                          isType="string",
+			                                          maxDepth=0)):
+				if not resp.message and resp.path.endswith(':PAR_IN'):
+					logger.debug('resp=' + repr(resp))
+					# FIXME: we need to check DMS datatype of link source and link drain!!!
+					# FIXME: we need to check if it's a valid PAR_IN and PAR_OUT!!!
+					for inst in self._bmo_instances:
+						if inst in resp.path:
+							# BMO link is on current PSC file
+
+							# getting datatype of PLC datapoint
+							# =>assuming other side is a valid PAR_IN of inst
+							# =>assuming other side has same datatype as our PAR_OUT
+							plc_dp = resp.path.split(":PAR_IN")[0]
+							plc_dp_resp = dms_ws.dp_get(path=plc_dp)[0]
+							if not plc_dp_resp.message:
+								outgoing_list.append(Linkpoint(name=inst, type=plc_dp_resp.type))
+								break
+			logger.debug('BMO_Elements_Handler.draw_connections(): outgoing_list=' + repr(outgoing_list))
+
+			# drawing links from this instance
+			for dst in outgoing_list:
+				x1, y1 = self._bmo_instances[bmo_inst_str].get_center_coords()
+				x2, y2 = self._bmo_instances[dst.name].get_center_coords()
+				curr_color = "dark red" if dst.type == "bool" else "dark green"
+				canvas_visu.create_line(x1, y1, x2, y2, fill=curr_color, width=2.0, arrow="last",
+				                        tags=MyGUI.CANVAS_BG_LINK_LINE_TAG)
+
+			# put all lines into foreground
+			# FIXME: I wanted to draw them in background, but then the arrows are hidden by BMO rectangles... we should calculate points where lines cross the BMO rectangles...!
+			#canvas_visu.tag_lower(MyGUI.CANVAS_BG_LINK_LINE_TAG)
+			canvas_visu.tag_raise(MyGUI.CANVAS_BG_LINK_LINE_TAG)
 
 
 class MyGUI(Tkinter.Frame):
@@ -232,7 +325,11 @@ class MyGUI(Tkinter.Frame):
 	                 BMO_MISSING_TAG: 'not in DMS',
 	                 BMO_TEMPLATE_TAG: 'not reinitialized'}
 
-	CANVAS_LINK_LINE_TAG = 'CANVAS_LINK_LINE'
+	# arrow during drag and drop
+	CANVAS_DND_LINK_LINE_TAG = 'CANVAS_DND_LINK_LINE'
+
+	# background arrows during hovering
+	CANVAS_BG_LINK_LINE_TAG = 'CANVAS_BG_LINK_LINE'
 
 	CANVAS_WIDTH = 1920
 	CANVAS_HEIGHT = 1080
@@ -240,7 +337,7 @@ class MyGUI(Tkinter.Frame):
 	#CANVAS_WIDTH = 800
 	#CANVAS_HEIGHT = 600
 
-	def __init__(self, parent, psc_handler, filewatcher, dms, prj, ge_host):
+	def __init__(self, parent, psc_handler, filewatcher, dms_ws, prj, ge_host):
 		Tkinter.Frame.__init__(self, parent)
 		self.parent = parent
 		# settings of rootwindow
@@ -248,7 +345,7 @@ class MyGUI(Tkinter.Frame):
 
 		self.psc_handler = psc_handler
 		self._filewatcher = filewatcher
-		self._dms = dms
+		self._dms_ws = dms_ws
 		self._prj = prj
 		self._ge_host = ge_host
 
@@ -302,6 +399,11 @@ class MyGUI(Tkinter.Frame):
 		self._canvas_visu.bind('<Motion>', self._on_mouseover)
 		self._canvas_visu.bind('<Enter>', self._on_mouseover)  # handle <Alt>+<Tab> switches between windows
 
+		# delete background link lines
+		# =>help from https://stackoverflow.com/questions/35111894/tkinter-canvas-leave-event-isnt-trigged
+		self._canvas_visu.tag_bind(MyGUI.BMO_EXISTS_TAG, '<Leave>', self._on_mouse_leave)
+
+
 		self._bmo_info_label = Tkinter.Label(master=parent, text='', anchor='w')
 		self._bmo_info_label.grid(row=1, column=0, padx=10, pady=10, sticky='ew')
 
@@ -327,10 +429,10 @@ class MyGUI(Tkinter.Frame):
 		x2 = x + 1
 		y1 = y - 1
 		y2 = y + 1
+		instance = ''
 		try:
 			rect = canvas.find_overlapping(x1, y1, x2, y2)[0]
 			state = ''
-			instance = ''
 			for tag in self._canvas_visu.gettags(rect):
 				if tag in MyGUI.BMO_INFO_DICT:
 					state = MyGUI.BMO_INFO_DICT[tag]
@@ -341,6 +443,11 @@ class MyGUI(Tkinter.Frame):
 		except IndexError:
 			curr_text = ''
 		self._bmo_info_label.configure(text=curr_text)
+
+		# draw background link lines from/to other BMO instances
+		self.psc_handler.draw_connections(dms_ws=self._dms_ws,
+		                                  canvas_visu=canvas,
+		                                  bmo_inst_str=instance)
 
 
 	def _on_mouse_press(self, event):
@@ -364,7 +471,7 @@ class MyGUI(Tkinter.Frame):
 
 				# draw link line with length 1
 				event.widget.create_line(event.x, event.y, event.x, event.y, width=2.0, arrow="last",
-				                         tags=MyGUI.CANVAS_LINK_LINE_TAG)
+				                         tags=MyGUI.CANVAS_DND_LINK_LINE_TAG)
 			else:
 				logger.debug('MyGUI._on_mouse_press(): ignoring invalid link source...')
 		except IndexError:
@@ -379,7 +486,7 @@ class MyGUI(Tkinter.Frame):
 		'''End drag of line to destination BMO instance'''
 
 		# delete link line
-		event.widget.delete(MyGUI.CANVAS_LINK_LINE_TAG)
+		event.widget.delete(MyGUI.CANVAS_DND_LINK_LINE_TAG)
 
 		# analyze release point
 		dst_instance = ''
@@ -432,7 +539,12 @@ class MyGUI(Tkinter.Frame):
 			# help from http://effbot.org/tkinterbook/canvas.htm#patterns
 			# and https://stackoverflow.com/questions/13114953/how-do-i-get-id-of-a-widget-that-invoke-an-event-tkinter
 			canvas = event.widget
-			canvas.coords(MyGUI.CANVAS_LINK_LINE_TAG, self._drag_data["x"], self._drag_data["y"], event.x, event.y)
+			canvas.coords(MyGUI.CANVAS_DND_LINK_LINE_TAG, self._drag_data["x"], self._drag_data["y"], event.x, event.y)
+
+
+	def _on_mouse_leave(self, event):
+		""" deleting background lines when mouse leaves BMO rectangle """
+		event.widget.delete(MyGUI.CANVAS_BG_LINK_LINE_TAG)
 
 
 	def _register_dms_callback(self):
@@ -443,8 +555,8 @@ class MyGUI(Tkinter.Frame):
 		dms_key_str = ':'.join(['System:Node', self._ge_host, 'Image'])
 
 		logger.debug('MyGUI._register_dms_callback(): trying to subscribe DMS key "' + dms_key_str + '"...')
-		sub_obj = self._dms.get_dp_subscription(path=dms_key_str,
-		                                        event=dms.ON_SET)
+		sub_obj = self._dms_ws.get_dp_subscription(path=dms_key_str,
+		                                           event=dms.ON_SET)
 		logger.debug('MyGUI._register_dms_callback(): adding callback for DMS key "' + dms_key_str + '"...')
 		msg = sub_obj.sub_response.message
 		if not msg:
@@ -484,8 +596,8 @@ class MyGUI(Tkinter.Frame):
 
 		if filename:
 			# only redraw canvas when shown PSC is not a reinit of BMO instance
-			dms_key_str = ':'.join(['System:Node', self._ge_host, 'ImgReInit'])
-			if not self._dms.dp_get(path=dms_key_str)[0].value:
+			dms_key_str = ':'.join(['^System:Node', self._ge_host, 'ImgReInit$'])
+			if not self._dms_ws.dp_get(path=dms_key_str)[0].value:
 				logger.info('MyGUI._cb_ge_image_changed(): GE opened PSC file "' + filename + '"')
 				psc_fullpath = os.path.join(self._prj, 'scr', filename)
 				self._load_psc_image(psc_fullpath)
@@ -531,7 +643,7 @@ class MyGUI(Tkinter.Frame):
 		def bmo_exists(instance_str):
 			# check if BMO instance does exist
 			dms_key_str = ':'.join([instance_str, 'OBJECT'])
-			resp = self._dms.dp_get(path=dms_key_str)
+			resp = self._dms_ws.dp_get(path=dms_key_str)
 			return resp[0].code == 'ok'
 
 		self.psc_handler.draw_elements(canvas_visu=self._canvas_visu,
@@ -551,7 +663,7 @@ def main(dms_server, dms_port):
 		logger.info('current project is "' + curr_proj + '")')
 
 		curr_ge_host = None
-		for resp in dms_ws.dp_get(path="", query=dms.Query(regExPath=r'System:Prog:GE:.*:UP', maxDepth=0)):
+		for resp in dms_ws.dp_get(path="", query=dms.Query(regExPath=r'^System:Prog:GE:.*:UP$', maxDepth=0)):
 			if resp.value:
 				curr_ge_host = resp.path.replace('System:Prog:GE:', '')[:-3]
 				logger.debug('found a running GE instance on host "' + curr_ge_host + '"...')
@@ -566,7 +678,7 @@ def main(dms_server, dms_port):
 
 			# Build a gui
 			rootWindow = Tkinter.Tk()
-			app = MyGUI(parent=rootWindow, psc_handler=curr_psc_handler, filewatcher=filewatcher, dms=dms_ws, prj=curr_proj, ge_host=curr_ge_host)
+			app = MyGUI(parent=rootWindow, psc_handler=curr_psc_handler, filewatcher=filewatcher, dms_ws=dms_ws, prj=curr_proj, ge_host=curr_ge_host)
 
 			# Keeps GUI mainloop running until GUI is closed
 			rootWindow.mainloop()
