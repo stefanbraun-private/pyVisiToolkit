@@ -24,6 +24,7 @@ import argparse
 import Tkinter, Tkconstants, ttk
 from visu.psc import Parser
 import os
+import math
 import datetime
 import collections
 import misc.timezone as timezone
@@ -125,6 +126,81 @@ class BMO_Instance_Metadata(object):
 		x = (x1 + x2) / 2
 		y = (y1 + y2) / 2
 		return x, y
+
+	def get_border_intersection(self, x, y):
+		""" calculate point, where line to (x,y) crosses rectangle-border of max. coordinates
+			(used when drawing arrows between centers of BMO instances,
+			for prevention of invisible arrow heads)
+		"""
+		# mathematic help from Wikipedia...
+		# https://de.wikipedia.org/wiki/Koordinatenform#Aus_der_Zweipunkteform
+		# https://de.wikipedia.org/wiki/Schnittpunkt#Schnittpunkt_zweier_Geraden
+
+		xs, ys = self.get_center_coords()
+		x1, y1, x2, y2 = self.get_max_coords()
+
+		# no need for calculation if other point is directly above, under, left or right
+		if x == xs:
+			ys = y1 if y < y1 else y2
+			return xs, ys
+		elif y == ys:
+			xs = x1 if x < x1 else x2
+			return xs, ys
+
+		# four lines through our rectangle-endpoints will have an intersection...
+		# =>we need lines where intersection is BETWEEN endpoints
+		line_to_target = self._get_line_koordinatenform(xs, ys, x, y)
+
+		# four sides of our rectangle
+		rect_lines = [(x1, y1, x2, y1),
+		              (x2, y1, x2, y2),
+		              (x2, y2, x1, y2),
+		              (x1, y2, x1, y1)]
+
+		rect_koordform_lines = []
+		for endpoints in rect_lines:
+			rect_koordform_lines.append(self._get_line_koordinatenform(*endpoints))
+
+		intersection_list = []
+		for idx, side_line in enumerate(rect_koordform_lines):
+			a1, b1, c1 = side_line
+			a2, b2, c2 = line_to_target
+			xs, ys = self._get_schnittpunkt(a1, b1, c1, a2, b2, c2)
+
+			# check if intersection is between endpoints
+			# then calculate distance for choosing shortest path
+			endp_x1, endp_y1, endp_x2, endp_y2 = rect_lines[idx]
+			min_endp_x = min(endp_x1, endp_x2)
+			max_endp_x = max(endp_x1, endp_x2)
+			min_endp_y = min(endp_y1, endp_y2)
+			max_endp_y = max(endp_y1, endp_y2)
+			if min_endp_x <= xs <= max_endp_x and min_endp_y <= ys <= max_endp_y:
+				distance = self._get_distance(x, y, xs, ys)
+				intersection_list.append((distance, xs, ys))
+
+		# choosing best match
+		# (distance is first tuple item =>sorting is easy)
+		distance, xs, ys = sorted(intersection_list)[0]
+		return xs, ys
+
+	def _get_line_koordinatenform(self, x1, y1, x2, y2):
+		# https://de.wikipedia.org/wiki/Koordinatenform#Aus_der_Zweipunkteform
+		a = y1 - y2
+		b = x2 - x1
+		c = x2*y1 - x1*y2
+		return a, b, c
+
+	def _get_schnittpunkt(self, a1, b1, c1, a2, b2, c2):
+		# https://de.wikipedia.org/wiki/Schnittpunkt#Schnittpunkt_zweier_Geraden
+		xs = 1.0*(c1*b2 - c2*b1)/(a1*b2 - a2*b1)
+		ys = 1.0*(a1*c2 - a2*c1)/(a1*b2 - a2*b1)
+		return int(xs), int(ys)
+
+	def _get_distance(self, x1, y1, x2, y2):
+		# Pythagoras
+		a = x2 - x1
+		b = y2 - y1
+		return math.sqrt(a**2 + b**2)
 
 
 class BMO_Elements_Handler(object):
@@ -233,7 +309,6 @@ class BMO_Elements_Handler(object):
 		# -drawing lines behind other items from center to center
 		# -digital = red, analog = green
 		# -arrows for showing signal direction (PAR_OUT -> PAR_IN; convention: "pull", not "push")
-		# FIXME: how to remove (or hide) all other connections and not interfering with drag&drop operation? Using tags?
 
 		class Linkpoint(object):
 			def __init__(self, name, type):
@@ -242,7 +317,6 @@ class BMO_Elements_Handler(object):
 
 		if bmo_inst_str:
 			# FIXME: perhaps we can combine both directions into a simpler code fragment?
-			# FIXME: perhaps we could use "extInfos" for getting BMO instance directly from DMS?
 			# links to this instance
 			incoming_list = []
 			for resp in dms_ws.dp_get(path="",
@@ -264,12 +338,23 @@ class BMO_Elements_Handler(object):
 							if not plc_dp_resp.message:
 								incoming_list.append(Linkpoint(name=inst, type=plc_dp_resp.type))
 								break
-			logger.debug('BMO_Elements_Handler.draw_connections(): incoming_list=' + repr(incoming_list))
+			#logger.debug('BMO_Elements_Handler.draw_connections(): incoming_list=' + repr(incoming_list))
 
 			# drawing links to this instance
 			for src in incoming_list:
-				x1, y1 = self._bmo_instances[src.name].get_center_coords()
-				x2, y2 = self._bmo_instances[bmo_inst_str].get_center_coords()
+				# arrow source: center of BMO instance
+				#x1, y1 = self._bmo_instances[src.name].get_center_coords()
+				# arrow destination: center of BMO instance
+				# x2, y2 = self._bmo_instances[bmo_inst_str].get_center_coords
+
+				# better results: always use intersection on rectangle of BMO instance
+				# (not drawing lines inside of rectangles)
+				src_x, src_y = self._bmo_instances[src.name].get_center_coords()
+				dst_x, dst_y = self._bmo_instances[bmo_inst_str].get_center_coords()
+
+				x1, y1 = self._bmo_instances[src.name].get_border_intersection(dst_x, dst_y)
+				x2, y2 = self._bmo_instances[bmo_inst_str].get_border_intersection(src_x, src_y)
+
 				curr_color = "dark red" if src.type == "bool" else "dark green"
 				canvas_visu.create_line(x1, y1, x2, y2, fill=curr_color, width=2.0, arrow="last",
 				                        tags=MyGUI.CANVAS_BG_LINK_LINE_TAG)
@@ -281,7 +366,6 @@ class BMO_Elements_Handler(object):
 			                                          isType="string",
 			                                          maxDepth=0)):
 				if not resp.message and resp.path.endswith(':PAR_IN'):
-					logger.debug('resp=' + repr(resp))
 					# FIXME: we need to check DMS datatype of link source and link drain!!!
 					# FIXME: we need to check if it's a valid PAR_IN and PAR_OUT!!!
 					for inst in self._bmo_instances:
@@ -296,19 +380,30 @@ class BMO_Elements_Handler(object):
 							if not plc_dp_resp.message:
 								outgoing_list.append(Linkpoint(name=inst, type=plc_dp_resp.type))
 								break
-			logger.debug('BMO_Elements_Handler.draw_connections(): outgoing_list=' + repr(outgoing_list))
+			#logger.debug('BMO_Elements_Handler.draw_connections(): outgoing_list=' + repr(outgoing_list))
 
 			# drawing links from this instance
 			for dst in outgoing_list:
-				x1, y1 = self._bmo_instances[bmo_inst_str].get_center_coords()
-				x2, y2 = self._bmo_instances[dst.name].get_center_coords()
+				# arrow source: center of BMO instance
+				#x1, y1 = self._bmo_instances[bmo_inst_str].get_center_coords()
+				# arrow destination: center of BMO instance
+				#x2, y2 = self._bmo_instances[dst.name].get_center_coords()
+
+				# better results: always use intersection on rectangle of BMO instance
+				# (not drawing lines inside of rectangles)
+				src_x, src_y = self._bmo_instances[bmo_inst_str].get_center_coords()
+				dst_x, dst_y = self._bmo_instances[dst.name].get_center_coords()
+
+				x1, y1 = self._bmo_instances[bmo_inst_str].get_border_intersection(dst_x, dst_y)
+				x2, y2 = self._bmo_instances[dst.name].get_border_intersection(src_x, src_y)
+
 				curr_color = "dark red" if dst.type == "bool" else "dark green"
 				canvas_visu.create_line(x1, y1, x2, y2, fill=curr_color, width=2.0, arrow="last",
 				                        tags=MyGUI.CANVAS_BG_LINK_LINE_TAG)
 
-			# put all lines into foreground
-			# FIXME: I wanted to draw them in background, but then the arrows are hidden by BMO rectangles... we should calculate points where lines cross the BMO rectangles...!
+			## put all lines into background
 			#canvas_visu.tag_lower(MyGUI.CANVAS_BG_LINK_LINE_TAG)
+			# =>better results: put all lines into foreground
 			canvas_visu.tag_raise(MyGUI.CANVAS_BG_LINK_LINE_TAG)
 
 
@@ -384,20 +479,21 @@ class MyGUI(Tkinter.Frame):
 		# FIXME: enabling scrolling: http://effbot.org/tkinterbook/canvas.htm#coordinate-systems
 		# FIXME: changing size of rootwindow doesn't affect scrollbars
 		# FIXME: should we scale canvas or use scrollbars when user resizes rootwindow? some PSC windows are huge...!
-		# FIXME: we should adjust "width" and "heigth" dynamically from max(max coordinates of PSC graphelements, size PSC window)
+		# done: we should adjust "width" and "heigth" dynamically from max(max coordinates of PSC graphelements, size PSC window)
 		# FIXME: we should implement a cleaner design. canvas widget into own class.
 		# FIXME: implement drag and drop for setting links (while moving: drawing line. on drop: show popup with PAR_INs/PLCs)
 		#       https://stackoverflow.com/questions/44887576/how-make-drag-and-drop-interface
 		#       https://stackoverflow.com/questions/15466469/tkinter-drag-and-drop
-		# FIXME: implement right-click "delete link" / "show parameters" (edit fields?)
-		# FIXME: implement mouse-hover: label showing BMO instance & class under mouse
-		# FIXME: checkbox "show links" ->red=digital, green=analog (only from/to one BMO instance, or between all?)
+		# FIXME: implement right-click "delete link"? / "show parameters" (edit fields?)
+		# done: implement mouse-hover: label showing BMO instance & class under mouse
+		# done: checkbox "show links" ->red=digital, green=analog (only from/to one BMO instance, or between all?)
 		self._canvas_visu.grid(row=0, column=0, padx=10, pady=10, sticky='nsew')
 
 		# show information when mouse is over a BMO instance
 		# =>help from https://stackoverflow.com/questions/33121545/how-to-display-canvas-coordinates-when-hovering-cursor-over-canvas
-		self._canvas_visu.bind('<Motion>', self._on_mouseover)
-		self._canvas_visu.bind('<Enter>', self._on_mouseover)  # handle <Alt>+<Tab> switches between windows
+		self._canvas_visu.tag_bind(MyGUI.BMO_EXISTS_TAG, '<Motion>', self._on_mouseover)
+		self._canvas_visu.tag_bind(MyGUI.BMO_EXISTS_TAG, '<Enter>', self._on_mouseover)  # handle <Alt>+<Tab> switches between windows
+		self._curr_bmo_instance = ''
 
 		# delete background link lines
 		# =>help from https://stackoverflow.com/questions/35111894/tkinter-canvas-leave-event-isnt-trigged
@@ -445,9 +541,15 @@ class MyGUI(Tkinter.Frame):
 		self._bmo_info_label.configure(text=curr_text)
 
 		# draw background link lines from/to other BMO instances
-		self.psc_handler.draw_connections(dms_ws=self._dms_ws,
-		                                  canvas_visu=canvas,
-		                                  bmo_inst_str=instance)
+		if instance is not self._curr_bmo_instance:
+			# mouse is over another rectangle
+			# =>need to redraw lines
+			# =>delete old lines
+			event.widget.delete(MyGUI.CANVAS_BG_LINK_LINE_TAG)
+			self._curr_bmo_instance = instance
+			self.psc_handler.draw_connections(dms_ws=self._dms_ws,
+			                                  canvas_visu=canvas,
+			                                  bmo_inst_str=instance)
 
 
 	def _on_mouse_press(self, event):
@@ -540,6 +642,7 @@ class MyGUI(Tkinter.Frame):
 			# and https://stackoverflow.com/questions/13114953/how-do-i-get-id-of-a-widget-that-invoke-an-event-tkinter
 			canvas = event.widget
 			canvas.coords(MyGUI.CANVAS_DND_LINK_LINE_TAG, self._drag_data["x"], self._drag_data["y"], event.x, event.y)
+
 
 
 	def _on_mouse_leave(self, event):

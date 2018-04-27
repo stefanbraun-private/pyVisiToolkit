@@ -15,6 +15,7 @@ You should have received a copy of the GNU General Public License along with thi
 import yaml
 import sys
 import re
+import os
 
 import Parser
 import visu.psc.ParserVars
@@ -95,7 +96,10 @@ class ParserConfig(object):
 		get_encoding()
 		if DEBUGGING:
 			my_print(u'ParserConfig is loading configuration file "' + fname + '"')
-		self._filename = fname
+
+		# help with keeping filename always relative to current module:
+		# https://stackoverflow.com/questions/10174211/make-an-always-relative-to-current-module-file-path
+		self._filename = os.path.join(os.path.dirname(__file__), fname)
 		self._config_dict = None
 		self._load_config()
 
