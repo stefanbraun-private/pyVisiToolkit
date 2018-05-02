@@ -1918,7 +1918,7 @@ if __name__ == '__main__':
 	# 	# 	print('sending TESTMSG...')
 	# 	# 	myClient._send_message(TESTMSG)
 
-	test_set = set([11])
+	test_set = set([3])
 
 
 	with DMSClient(u'test', u'user') as myClient:
@@ -1967,8 +1967,8 @@ if __name__ == '__main__':
 		if 3 in test_set:
 			print('\nNow testing query function:')
 			print('\twithout query: ' + repr(myClient.dp_get(path="")))
-			print('\twith query: ' + repr(myClient.dp_get(path="",
-			                                              query=Query(regExPath=".*", maxDepth=1)
+			print('\twith query: ' + repr(myClient.dp_get(path="GE",
+			                                              query=Query(regExPath=".*", maxDepth=2)
 			                                              )
 			                              )
 			      )

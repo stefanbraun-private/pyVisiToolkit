@@ -203,7 +203,7 @@ class BMO_Instance_Metadata(object):
 		return math.sqrt(a**2 + b**2)
 
 
-class BMO_Elements_Handler(object):
+class PSC_Elements_Handler(object):
 	"""
 	extracts data of PSC BMO elements
 	"""
@@ -298,111 +298,83 @@ class BMO_Elements_Handler(object):
 			canvas_visu.create_text((x, y), text=self._bmo_instances[instance].get_BMO_class(), tags=tags)
 
 			# update minimal size of canvas
-			canvas_visu.configure(width=self._used_area[0] + BMO_Elements_Handler.MARGIN_SIZE,
-			                      height=self._used_area[1] + BMO_Elements_Handler.MARGIN_SIZE)
+			canvas_visu.configure(width=self._used_area[0] + PSC_Elements_Handler.MARGIN_SIZE,
+			                      height=self._used_area[1] + PSC_Elements_Handler.MARGIN_SIZE)
 
 
 	def draw_connections(self, dms_ws, canvas_visu, bmo_inst_str):
 		""" draw connections from/to other BMO instances """
 
-		# some ideas:
-		# -drawing lines behind other items from center to center
+		# FIXME: instead of asking DMS everytime, we should implement a cache with monitoring changes of PAR_IN DMS-keys
+		# FIXME: refactoring/cleanup: DMS-interaction should be in other class (this class does only working on PSC files)
+		# -drawing lines between rectangles
 		# -digital = red, analog = green
 		# -arrows for showing signal direction (PAR_OUT -> PAR_IN; convention: "pull", not "push")
 
-		class Linkpoint(object):
-			def __init__(self, name, type):
-				self.name = name
+		class Link(object):
+			def __init__(self, src, dst, type):
+				self.src = src
+				self.dst = dst
 				self.type = type
 
+		def _get_datatype(PAR_IN_key):
+			# getting datatype of PLC datapoint
+			# =>assuming other side is a valid PAR_OUT of inst
+			# =>assuming other side has same datatype as our PAR_IN
+			plc_dp = PAR_IN_key.split(":PAR_IN")[0]
+			plc_dp_resp = dms_ws.dp_get(path=plc_dp)[0]
+			return plc_dp_resp.message, plc_dp_resp.type
+
 		if bmo_inst_str:
-			# FIXME: perhaps we can combine both directions into a simpler code fragment?
-			# links to this instance
-			incoming_list = []
-			for resp in dms_ws.dp_get(path="",
-			                          query=dms.Query(regExPath=r'^' + bmo_inst_str + r':\w+:PAR_IN$',
-			                                          isType="string",
-			                                          maxDepth=0)):
-				if resp.value:
-					# FIXME: we need to check DMS datatype of link source and link drain!!!
-					# FIXME: we need to check if it's a valid PAR_IN and PAR_OUT!!!
-					for inst in self._bmo_instances:
-						if inst in resp.value:
-							# BMO link is on current PSC file
+			# looping through all BMO instances on current PSC and collect connections
+			# assumption: this is faster than doing ressource-intensive RegEx search in DMS
 
-							# getting datatype of PLC datapoint
-							# =>assuming other side is a valid PAR_OUT of inst
-							# =>assuming other side has same datatype as our PAR_IN
-							plc_dp = resp.path.split(":PAR_IN")[0]
-							plc_dp_resp = dms_ws.dp_get(path=plc_dp)[0]
-							if not plc_dp_resp.message:
-								incoming_list.append(Linkpoint(name=inst, type=plc_dp_resp.type))
-								break
-			#logger.debug('BMO_Elements_Handler.draw_connections(): incoming_list=' + repr(incoming_list))
+			# links to and from this instance
+			link_list = []
 
-			# drawing links to this instance
-			for src in incoming_list:
-				# arrow source: center of BMO instance
-				#x1, y1 = self._bmo_instances[src.name].get_center_coords()
-				# arrow destination: center of BMO instance
-				# x2, y2 = self._bmo_instances[bmo_inst_str].get_center_coords
+			for inst in self._bmo_instances:
 
-				# better results: always use intersection on rectangle of BMO instance
+				# search PAR_INs and collect relevant links
+				for resp in dms_ws.dp_get(path=inst,
+				                          query=dms.Query(regExPath=r'.+:PAR_IN$',
+				                                          isType="string",
+				                                          maxDepth=2)):
+					if resp.value:
+						for other_inst in self._bmo_instances:
+							if resp.path.startswith(bmo_inst_str) and other_inst in resp.value:
+								# BMO link is on current PSC file
+								# incoming link
+
+								msg, datatype = _get_datatype(resp.path)
+								if not msg:
+									link_list.append(Link(src=other_inst, dst=bmo_inst_str, type=datatype))
+									break
+
+							elif resp.value.startswith(bmo_inst_str) and other_inst in resp.path:
+								# BMO link is on current PSC file
+								# outgoing link
+
+								msg, datatype = _get_datatype(resp.path)
+								if not msg:
+									link_list.append(Link(src=bmo_inst_str, dst=other_inst, type=datatype))
+									break
+
+			# drawing links between this instance and other instances
+			for link in link_list:
+				# use intersection on rectangle of BMO instance as source and destination of arrows
 				# (not drawing lines inside of rectangles)
-				src_x, src_y = self._bmo_instances[src.name].get_center_coords()
-				dst_x, dst_y = self._bmo_instances[bmo_inst_str].get_center_coords()
+				src_x, src_y = self._bmo_instances[link.src].get_center_coords()
+				dst_x, dst_y = self._bmo_instances[link.dst].get_center_coords()
 
-				x1, y1 = self._bmo_instances[src.name].get_border_intersection(dst_x, dst_y)
-				x2, y2 = self._bmo_instances[bmo_inst_str].get_border_intersection(src_x, src_y)
+				x1, y1 = self._bmo_instances[link.src].get_border_intersection(dst_x, dst_y)
+				x2, y2 = self._bmo_instances[link.dst].get_border_intersection(src_x, src_y)
 
-				curr_color = "dark red" if src.type == "bool" else "dark green"
-				canvas_visu.create_line(x1, y1, x2, y2, fill=curr_color, width=2.0, arrow="last",
-				                        tags=MyGUI.CANVAS_BG_LINK_LINE_TAG)
-
-			# links from this instance
-			outgoing_list = []
-			for resp in dms_ws.dp_get(path="",
-			                          query=dms.Query(regExValue=r'^' + bmo_inst_str + r':\w+',
-			                                          isType="string",
-			                                          maxDepth=0)):
-				if not resp.message and resp.path.endswith(':PAR_IN'):
-					# FIXME: we need to check DMS datatype of link source and link drain!!!
-					# FIXME: we need to check if it's a valid PAR_IN and PAR_OUT!!!
-					for inst in self._bmo_instances:
-						if inst in resp.path:
-							# BMO link is on current PSC file
-
-							# getting datatype of PLC datapoint
-							# =>assuming other side is a valid PAR_IN of inst
-							# =>assuming other side has same datatype as our PAR_OUT
-							plc_dp = resp.path.split(":PAR_IN")[0]
-							plc_dp_resp = dms_ws.dp_get(path=plc_dp)[0]
-							if not plc_dp_resp.message:
-								outgoing_list.append(Linkpoint(name=inst, type=plc_dp_resp.type))
-								break
-			#logger.debug('BMO_Elements_Handler.draw_connections(): outgoing_list=' + repr(outgoing_list))
-
-			# drawing links from this instance
-			for dst in outgoing_list:
-				# arrow source: center of BMO instance
-				#x1, y1 = self._bmo_instances[bmo_inst_str].get_center_coords()
-				# arrow destination: center of BMO instance
-				#x2, y2 = self._bmo_instances[dst.name].get_center_coords()
-
-				# better results: always use intersection on rectangle of BMO instance
-				# (not drawing lines inside of rectangles)
-				src_x, src_y = self._bmo_instances[bmo_inst_str].get_center_coords()
-				dst_x, dst_y = self._bmo_instances[dst.name].get_center_coords()
-
-				x1, y1 = self._bmo_instances[bmo_inst_str].get_border_intersection(dst_x, dst_y)
-				x2, y2 = self._bmo_instances[dst.name].get_border_intersection(src_x, src_y)
-
-				curr_color = "dark red" if dst.type == "bool" else "dark green"
+				curr_color = "dark red" if link.type == "bool" else "dark green"
 				canvas_visu.create_line(x1, y1, x2, y2, fill=curr_color, width=2.0, arrow="last",
 				                        tags=MyGUI.CANVAS_BG_LINK_LINE_TAG)
 
 			## put all lines into background
-			#canvas_visu.tag_lower(MyGUI.CANVAS_BG_LINK_LINE_TAG)
+			# canvas_visu.tag_lower(MyGUI.CANVAS_BG_LINK_LINE_TAG)
 			# =>better results: put all lines into foreground
 			canvas_visu.tag_raise(MyGUI.CANVAS_BG_LINK_LINE_TAG)
 
@@ -776,7 +748,7 @@ def main(dms_server, dms_port):
 			# FIXME: implement a cleaner way for keeping ONE instance of ParserConfig in whole program...
 			Parser.PscParser.load_config(Parser.PARSERCONFIGFILE)
 
-			curr_psc_handler = BMO_Elements_Handler()
+			curr_psc_handler = PSC_Elements_Handler()
 			filewatcher = Filewatcher()
 
 			# Build a gui
