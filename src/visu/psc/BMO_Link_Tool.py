@@ -25,6 +25,11 @@ import Tkinter, Tkconstants, ttk
 from visu.psc import Parser
 import os
 import math
+import sqlite3
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy import Column, Integer, String, DateTime
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy import create_engine
 import datetime
 import collections
 import misc.timezone as timezone
@@ -58,6 +63,248 @@ ch.setFormatter(formatter)
 
 # add ch to logger
 logger.addHandler(ch)
+
+
+# sqlalchemy base class
+# (based on tutorial http://docs.sqlalchemy.org/en/latest/orm/tutorial.html )
+ORMBase = declarative_base()
+
+# sqlalchemy database engine
+# (based on documentation http://docs.sqlalchemy.org/en/latest/core/engines.html )
+engine = create_engine('sqlite://')
+
+# sqlalchemy database session
+# (based on tutorial http://docs.sqlalchemy.org/en/latest/orm/tutorial.html )
+Session = sessionmaker(bind=engine)
+
+
+
+class Plc_dp(object):
+	def __init__(self, dms_key):
+		self._dms_key = dms_key
+
+
+class PAR_IN_dp(Plc_dp):
+	def __init__(self, **kwargs):
+		Plc_dp.__init__(**kwargs)
+		self._link_target = kwargs['link_target']
+
+
+class Instances(ORMBase):
+	#(based on tutorial http://docs.sqlalchemy.org/en/latest/orm/tutorial.html )
+	__tablename__ = 'instances'
+
+	# states of BMO instances in DMS
+	BMO_STATE_VALID = 'VALID'
+	BMO_STATE_NO_REINIT = 'NO_REINIT'
+	BMO_STATE_MISSING = 'MISSING'
+	BMO_STATE_UNKNOWN = 'UNKNOWN'
+
+	id = Column(Integer, primary_key=True)
+	name = Column(String)
+	bmoclass = Column(String)
+	bmostate = Column(String)
+	timestamp = Column(DateTime)
+
+	def __repr__(self):
+		return "<Instance(name='%s', bmoclass='%s', bmostate='%s', timestamp='%s')>" % (self.name, self.bmoclass, self.bmostate, self.timestamp)
+
+class Plc_dps(ORMBase):
+	#(based on tutorial http://docs.sqlalchemy.org/en/latest/orm/tutorial.html )
+	__tablename__ = 'plc_dps'
+
+	# tags of PLC DMS datapoint
+	# (assumption: either PAR_IN or PAR_OUT are set, not both together)
+	PLC_TAG_MISSING = 'MISSING'
+	PLC_TAG_NONE = 'NONE'
+	PLC_TAG_PAR_IN = 'PAR_IN'
+	PLC_TAG_PAR_OUT = 'PAR_OUT'
+
+	id = Column(Integer, primary_key=True)
+	dms_key = Column(String)
+	instance_id = Column(Integer)
+	datatype = Column(String)
+	tag = Column(String)
+
+	def __repr__(self):
+		return "<Plc_dps(dms_key='%s', instance_id='%s', datatype='%s', tag='%s')>" % (self.dms_key, self.instance_id, self.datatype, self.tag)
+
+class Links(ORMBase):
+	#(based on tutorial http://docs.sqlalchemy.org/en/latest/orm/tutorial.html )
+	__tablename__ = 'links'
+
+	# link type between BMO instances
+	LINK_TYPE_INVALID = 'INVALID'
+	LINK_TYPE_ANALOG = 'ANALOG'
+	LINK_TYPE_DIGITAL = 'DIGITAL'
+
+	id = Column(Integer, primary_key=True)
+	src_plc_id = Column(Integer)
+	dst_plc_id = Column(Integer)
+	type = Column(String)
+
+	def __repr__(self):
+		return "<Plc_dps(src_plc_id ='%s', dst_plc_id ='%s', type='%s')>" % (self.src_plc_id , self.dst_plc_id , self.type)
+
+
+
+class BMO_Linkcache(threading.Thread):
+	""" searches and keeps overview over links between BMO instances on current PSC file """
+	# idea: -storing all infos in RAM-based sqlite database
+	#       -opening of PSC file leads to populating database
+	#       -DMS events from changed PAR_IN keys were used for updating database
+	#
+	# attention: sqlite3 knows different levels of thread safety!
+	# in Python 2.7 "sqlite3.threadsafety" is set to "1", means "SQLITE_CONFIG_SERIALIZED",
+	# means complete threadsafety without restrictions
+	# http://www.sqlite.org/compile.html#threadsafe
+	# http://www.sqlite.org/c3ref/c_config_covering_index_scan.html#sqliteconfigserialized
+
+
+
+	def __init__(self, dms_ws, found_bmo_queue):
+		self._dms_ws = dms_ws
+		self._found_bmo_queue = found_bmo_queue   # threadsafe queue from PSC file: contained BMO instances
+		threading.Thread.__init__(self)
+
+		self._keep_running = False
+		self.daemon = True
+
+		# setting up database
+		# based on example from http://zetcode.com/db/sqlitepythontutorial/
+		# and help from http://stackabuse.com/a-sqlite-tutorial-with-python/
+		# =>using autocommit mode: https://docs.python.org/2/library/sqlite3.html#connection-objects
+		self._dbcon = sqlite3.connect(':memory:', isolation_level=None)
+		with self._dbcon:
+			self._dbcur = self._dbcon.cursor()
+			self._dbcur.execute(BMO_Linkcache.INSTANCES_SQL)
+			# keeping BMO instance names unique ( http://www.sqlitetutorial.net/sqlite-index/ )
+			self._dbcur.execute("CREATE UNIQUE INDEX idx_bmo_inst_names ON instances (name);")
+			self._dbcur.execute(BMO_Linkcache.PLC_SQL)
+			self._dbcur.execute(BMO_Linkcache.LINKS_SQL)
+			logger.debug('BMO_Linkcache.__init__(): sqlite3 databases are ready.')
+
+		# FIXME: why doesn't DMS generate events with eventfilter dms.ON_DELETE?!?!?
+		# =>workaround: we need to check DMS keys if they still exists... :-(
+		self._OBJECT_sub = self._subscribe(regExPath=r'^(?!(BMO|System)).+:OBJECT$',
+		                                   cb_func=self._cb_update_bmoinstance,
+		                                   eventfilter=dms.ON_CREATE + dms.ON_DELETE)
+		self._PAR_IN_sub = self._subscribe(regExPath=r'^(?!(BMO|System)).+:PAR_IN$',
+		                                   cb_func=self._cb_update_link,
+		                                   eventfilter=dms.ON_SET + dms.ON_DELETE)
+
+		# default timestamp of freshly inserted BMO instances
+		# (it's in the past so this instance gets checked very soon)
+		self._old_timestamp = datetime.datetime.now()
+
+
+	def run(self):
+		while self._keep_running:
+			# look in queue if there are new BMO instances
+			try:
+				new_bmo, bmo_class = self._found_bmo_queue.get(block=False)
+			except queue.Empty:
+				pass
+				# FIXME: here we should check all tables:
+				# if state == BMO_STATE_UNKNOWN then collect all informations
+				# if BMO instance is no more in DMS then set it to BMO_STATE_MISSING and delete it's entries in the other tables
+				#   (currently we allow crowing of instances table with old values, we assume that this development tool is not running for longtime)
+				# =>we implement "freshness"-value (timestamp) in our table and always check the oldest one in current loop (this way it's possible to iterate over table while it's growing)
+			else:
+			# (this is an optional else clause when no exception occured)
+			# update our database with this new entry
+			# (BMO instance name is unique since we use it as index: http://www.sqlitetutorial.net/sqlite-replace-statement/ )
+			self._dbcon.execute("INSERT OR REPLACE INTO instances(name, class, state, timestamp) values (?, ?, ?, ?)",
+			                    (new_bmo, bmo_class, BMO_Linkcache.BMO_STATE_UNKNOWN, self._old_timestamp))
+
+
+
+
+
+	def update_bmo_instances(self, bmo_instances_list):
+		""" another PSC file is shown ->update database """
+
+		old_bmo_instances = set(self._dbcur.execute("SELECT name FROM instances").fetchall())
+		curr_bmo_instances = set(bmo_instances_list)
+
+		removed_instances = curr_bmo_instances - old_bmo_instances
+		logger.debug('BMO_Linkcache.update_bmo_instances(): these BMO instances were removed in PSC: ' + str(removed_instances))
+		for inst in removed_instances:
+			inst_id = self._dbcur.execute("SELECT instance_id FROM instances WHERE name=?", (inst,)).fetchall()[0]
+
+			# cleaning up all tables...
+			# help from https://stackoverflow.com/questions/3977570/how-to-delete-record-from-table
+			self._dbcur.execute("DELETE FROM instances WHERE instance_id=?", (inst_id,))
+
+			for plc_id in self._dbcur.execute("SELECT plc_id FROM plcs WHERE instance_id=?", (inst_id,)).fetchall():
+				self._dbcur.execute("DELETE FROM links WHERE src_plc_id=? or dst_plc_id=?", (plc_id, plc_id))
+			self._dbcur.execute("DELETE FROM plcs WHERE instance_id=?", (inst_id,))
+
+		added_instances = old_bmo_instances - curr_bmo_instances
+		logger.debug('BMO_Linkcache.update_bmo_instances(): these BMO instances were added in PSC: ' + str(added_instances))
+		for inst in added_instances:
+			# FIXME: implement BMO-check, search all necessary information in DMS
+			pass
+
+
+	def _subscribe(self, regExPath, cb_func, eventfilter):
+		logger.debug('BMO_Linkcache._subscribe(): trying to subscribe regExPath "' + regExPath + '"...')
+		sub_obj = self._dms_ws.get_dp_subscription(path="",
+		                                           query=dms.Query(regExPath=regExPath,
+		                                                           maxDepth=0),
+		                                           event=eventfilter)
+		logger.debug('BMO_Linkcache._subscribe(): trying to add callback for regExPath "' + regExPath + '"...')
+		msg = sub_obj.sub_response.message
+		if not msg:
+			sub_obj += cb_func
+			logger.info('BMO_Linkcache._subscribe(): monitoring of regExPath "' + regExPath + '" is ready.')
+			return sub_obj
+		else:
+			logger.error('BMO_Linkcache._subscribe(): monitoring of regExPath "' + regExPath + '" failed! [message: ' + msg + '])')
+			raise Exception('subscription failed!')
+
+
+	def _cb_update_link(self, event):
+		""" called by DMS subscription: 'PAR_IN' DMS-key changed """
+		logger.debug('BMO_Linkcache._cb_update_link() was called: event=' + repr(event))
+
+		dst_plc = event.path.split(':PAR_IN')[0]
+		if dst_plc:
+			# check if we already know this PLC datapoint
+			if not self._is_plc_known(dst_plc):
+				self._update_plc(dst_plc)
+			if ":" in event.value:
+				src_plc = event.value
+				# assumption that it's a valid link source definition
+				if not self._is_plc_known(src_plc):
+					self._update_plc(src_plc)
+
+				# FIXME: update link table and link state (lookup in DMS)
+
+		else:
+			logger.Error('BMO_Linkcache._cb_update_link(): can not handle unexpected event "' + repr(event) + '"!')
+
+
+
+	def _cb_update_bmoinstance(self, event):
+		""" called by DMS subscription: 'OBJECT' DMS-key changed """
+		logger.debug('BMO_Linkcache._cb_update_bmoinstance() was called: event=' + repr(event))
+
+		# inform background thread about new BMO instance
+		new_bmo = event.path.split(':OBJECT')[0]
+		bmo_class = event.value
+		if new_bmo:
+			self._found_bmo_queue.put((new_bmo, bmo_class), block=False)
+
+
+	def _is_plc_known(self, dms_key):
+		""" check if given PLC datapoint is already in database """
+		with self._dbcon:
+			return self._dbcur.execute("SELECT dms_key FROM plcs WHERE dms_key=?", (dms_key,)).fetchall() != []
+
+	def _update_plc(self, dms_key):
+		""" update database with metadata about given PLC datapoint """
+		# FIXME: get metadata from DMS and insert into database
 
 
 class Filewatcher(threading.Thread):
@@ -211,7 +458,8 @@ class PSC_Elements_Handler(object):
 	# margin around elements most right and most down
 	MARGIN_SIZE = 10
 
-	def __init__(self):
+	def __init__(self, bmo_linkwatcher):
+		self._bmo_linkwatcher = bmo_linkwatcher
 		self.fname = None
 
 		self._bmo_instances = {}
@@ -740,6 +988,7 @@ def main(dms_server, dms_port):
 		curr_ge_host = None
 		for resp in dms_ws.dp_get(path="", query=dms.Query(regExPath=r'^System:Prog:GE:.*:UP$', maxDepth=0)):
 			if resp.value:
+				# DMS key of "up"-Bit is "System:Prog:GE:<host>:UP" => extracting <host>
 				curr_ge_host = resp.path.replace('System:Prog:GE:', '')[:-3]
 				logger.debug('found a running GE instance on host "' + curr_ge_host + '"...')
 				break
@@ -748,7 +997,13 @@ def main(dms_server, dms_port):
 			# FIXME: implement a cleaner way for keeping ONE instance of ParserConfig in whole program...
 			Parser.PscParser.load_config(Parser.PARSERCONFIGFILE)
 
-			curr_psc_handler = PSC_Elements_Handler()
+			bmo_linkwatcher = BMO_Linkcache(dms_ws=dms_ws)
+			# some tests...
+
+			time.sleep(300)
+			raise Exception()
+
+			curr_psc_handler = PSC_Elements_Handler(bmo_linkwatcher=bmo_linkwatcher)
 			filewatcher = Filewatcher()
 
 			# Build a gui
