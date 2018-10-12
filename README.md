@@ -1,4 +1,5 @@
-# pyVisiToolkit
+# pyVisiToolkit (WARNING: deprecated!)  
+# successor project: "visitoolkit")  
 Miscellaneous inofficial homegrown tools and helpers written in Python 2.7
 for the proprietary Building and Process Management System
 
